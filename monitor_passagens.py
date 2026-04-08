@@ -11,7 +11,7 @@ TELEGRAM_CHAT_ID = "8709149533"
 
 ORIGEM = "VDC"         # Vitória da Conquista
 PRECO_MAXIMO = 3500    # R$ — só avisa se o preço for abaixo disso
-VERIFICAR_HORAS = 6    # verifica a cada 6 horas
+VERIFICAR_HORAS = 0.05    # verifica a cada 6 horas
 
 # ============================================================
 #  DESTINOS MONITORADOS
@@ -131,7 +131,7 @@ def buscar_melhor_oferta(codigo_iata, nome_cidade, emoji):
                 "limit": 1,
                 "sorting": "price",
                 "currency": "brl",
-                "token": "PutHereYourToken"
+                "token": "116c87c7d80210016077ea55eeb8fcd1"
             }
             r = requests.get(url, params=params, timeout=15)
             if r.status_code == 200:
