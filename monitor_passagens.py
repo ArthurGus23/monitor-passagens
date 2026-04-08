@@ -6,6 +6,9 @@ from datetime import datetime, timedelta
 # ============================================================
 #  CONFIGURAÇÕES — edite apenas esta seção
 # ============================================================
+import os
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 TELEGRAM_TOKEN = "8684505587:AAFLvOeiWm-H6KR5u3UjoMUyuz5GKNJU6MA"
 TELEGRAM_CHAT_ID = "8709149533"
 
@@ -131,7 +134,7 @@ def buscar_melhor_oferta(codigo_iata, nome_cidade, emoji):
                 "limit": 1,
                 "sorting": "price",
                 "currency": "brl",
-                "token": "116c87c7d80210016077ea55eeb8fcd1"
+                "token": os.getenv("TRAVEL_TOKEN")
             }
             r = requests.get(url, params=params, timeout=15)
             if r.status_code == 200:
