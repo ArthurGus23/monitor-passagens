@@ -4,16 +4,13 @@ import schedule
 from datetime import datetime, timedelta
 import os
 
-# DEBUG — mostra se as variáveis estão chegando
-print("=== DEBUG ===")
-print(f"TELEGRAM_TOKEN: {os.getenv('TELEGRAM_TOKEN')}")
-print(f"TELEGRAM_CHAT_ID: {os.getenv('TELEGRAM_CHAT_ID')}")
-print(f"TRAVEL_TOKEN: {os.getenv('TRAVEL_TOKEN')}")
-print("=============")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TRAVEL_TOKEN = os.getenv("TRAVEL_TOKEN")
 
 ORIGEM = "VDC"         # Vitória da Conquista
 PRECO_MAXIMO = 15000    # R$ — só avisa se o preço for abaixo disso
-VERIFICAR_HORAS = 0.05    # verifica a cada 6 horas
+VERIFICAR_HORAS = 0.5    # verifica a cada 6 horas
 
 # ============================================================
 #  DESTINOS MONITORADOS
