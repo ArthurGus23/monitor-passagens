@@ -2,13 +2,14 @@ import requests
 import time
 import schedule
 from datetime import datetime, timedelta
-
-# ============================================================
-#  CONFIGURAÇÕES — edite apenas esta seção
-# ============================================================
 import os
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+# DEBUG — mostra se as variáveis estão chegando
+print("=== DEBUG ===")
+print(f"TELEGRAM_TOKEN: {os.getenv('TELEGRAM_TOKEN')}")
+print(f"TELEGRAM_CHAT_ID: {os.getenv('TELEGRAM_CHAT_ID')}")
+print(f"TRAVEL_TOKEN: {os.getenv('TRAVEL_TOKEN')}")
+print("=============")
 
 ORIGEM = "VDC"         # Vitória da Conquista
 PRECO_MAXIMO = 15000    # R$ — só avisa se o preço for abaixo disso
