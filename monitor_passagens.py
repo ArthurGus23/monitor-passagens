@@ -10,7 +10,7 @@ TELEGRAM_TOKEN = "8684505587:AAFLvOeiWm-H6KR5u3UjoMUyuz5GKNJU6MA"
 TELEGRAM_CHAT_ID = "8709149533"
 
 ORIGEM = "VDC"         # Vitória da Conquista
-PRECO_MAXIMO = 5000    # R$ — só avisa se o preço for abaixo disso
+PRECO_MAXIMO = 3500    # R$ — só avisa se o preço for abaixo disso
 VERIFICAR_HORAS = 6    # verifica a cada 6 horas
 
 # ============================================================
