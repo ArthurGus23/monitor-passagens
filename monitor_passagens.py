@@ -9,11 +9,9 @@ from datetime import datetime, timedelta
 import os
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-TELEGRAM_TOKEN = "8684505587:AAFLvOeiWm-H6KR5u3UjoMUyuz5GKNJU6MA"
-TELEGRAM_CHAT_ID = "8709149533"
 
 ORIGEM = "VDC"         # Vitória da Conquista
-PRECO_MAXIMO = 3500    # R$ — só avisa se o preço for abaixo disso
+PRECO_MAXIMO = 15000    # R$ — só avisa se o preço for abaixo disso
 VERIFICAR_HORAS = 0.05    # verifica a cada 6 horas
 
 # ============================================================
