@@ -20,7 +20,7 @@ VERIFICAR_HORAS  = 3       # a cada 3 horas
 # ============================================================
 DESTINOS = [
     # ⭐ FOCO PRINCIPAL
-    ("TLL", "Tallinn, Estônia",           "🇪🇪"),
+    ("DUB", "Dublin, Irlanda",            "🇮🇪"),
 
     # 🌍 EUROPA
     ("BER", "Berlim, Alemanha",           "🇩🇪"),
@@ -33,13 +33,13 @@ DESTINOS = [
     ("PRG", "Praga, Rep. Tcheca",         "🇨🇿"),
     ("WAW", "Varsóvia, Polônia",          "🇵🇱"),
     ("BUD", "Budapeste, Hungria",         "🇭🇺"),
-    ("ATH", "Atenas, Grécia",             "🇬🇷"),
+    ("ATH", "Atenas, Grécia",             "🇬🇷"),              ("DUB", "Dublin, Irlanda",            "🇮🇪"),
     ("LIS", "Lisboa, Portugal",           "🇵🇹"),
     ("CPH", "Copenhague, Dinamarca",      "🇩🇰"),
     ("OSL", "Oslo, Noruega",              "🇳🇴"),
     ("ARN", "Estocolmo, Suécia",          "🇸🇪"),
     ("HEL", "Helsinki, Finlândia",        "🇫🇮"),
-    ("DUB", "Dublin, Irlanda",            "🇮🇪"),
+    ("TLL", "Tallinn, Estônia",           "🇪🇪"),
     ("SVO", "Moscou, Rússia",             "🇷🇺"),
     ("IST", "Istambul, Turquia",          "🇹🇷"),
     ("OTP", "Bucareste, Romênia",         "🇷🇴"),
