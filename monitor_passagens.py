@@ -267,7 +267,6 @@ if __name__ == "__main__":
         f"💰 Alerta se preço ≤ R$ {PRECO_MAXIMO:,}\n"
         f"🔗 Links diretos via Kayak\n"
         f"🕐 Verificação a cada {VERIFICAR_HORAS}h\n\n"
-        "Alertas chegando para 3 usuários! ✅"
     )
 
     verificar_todos()
