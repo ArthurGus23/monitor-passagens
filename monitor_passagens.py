@@ -11,9 +11,9 @@ TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 TRAVEL_TOKEN     = os.getenv("TRAVEL_TOKEN")
 
-ORIGEM           = "VDC"    # Vitória da Conquista
-PRECO_MAXIMO     = 15000    # R$
-VERIFICAR_HORAS  = 1        # a cada 6 horas
+ORIGEM           = "GRU"    # Guarulhos
+PRECO_MAXIMO     = 4000    # R$
+VERIFICAR_HORAS  = 3       # a cada 3 horas
 
 # ============================================================
 #  DESTINOS MONITORADOS
