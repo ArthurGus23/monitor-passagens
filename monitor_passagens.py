@@ -233,7 +233,7 @@ if __name__ == "__main__":
     # Testa conexão com Telegram logo de cara
     enviar_telegram(
         "🚀 <b>Monitor de passagens iniciado!</b>\n\n"
-        f"🛫 Origem: Vitória da Conquista (VDC)\n"
+        f"🛫 Origem: Guarulhos (GRU)\n"
         f"🌍 Destinos monitorados: <b>{len(DESTINOS)} capitais</b>\n"
         f"⭐ Foco principal: Tallinn, Estônia 🇪🇪\n"
         f"💰 Alerta se preço ≤ R$ {PRECO_MAXIMO:,}\n"
