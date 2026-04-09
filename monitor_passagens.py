@@ -12,7 +12,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 TRAVEL_TOKEN     = os.getenv("TRAVEL_TOKEN")
 
 ORIGEM           = "GRU"    # Guarulhos
-PRECO_MAXIMO     = 4000    # R$
+PRECO_MAXIMO     = 20000    # R$
 VERIFICAR_HORAS  = 3       # a cada 3 horas
 
 # ============================================================
