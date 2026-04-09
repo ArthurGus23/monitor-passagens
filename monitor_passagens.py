@@ -4,92 +4,94 @@ import schedule
 from datetime import datetime, timedelta
 import os
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+# ============================================================
+#  CONFIGURAÇÕES
+# ============================================================
+TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-TRAVEL_TOKEN = os.getenv("TRAVEL_TOKEN")
+TRAVEL_TOKEN     = os.getenv("TRAVEL_TOKEN")
 
-ORIGEM = "VDC"         # Vitória da Conquista
-PRECO_MAXIMO = 15000    # R$ — só avisa se o preço for abaixo disso
-VERIFICAR_HORAS = 0.5    # verifica a cada 6 horas
+ORIGEM           = "VDC"    # Vitória da Conquista
+PRECO_MAXIMO     = 15000    # R$
+VERIFICAR_HORAS  = 1        # a cada 6 horas
 
 # ============================================================
 #  DESTINOS MONITORADOS
-#  Formato: ("Código IATA", "Nome da cidade", "Emoji da bandeira")
 # ============================================================
 DESTINOS = [
     # ⭐ FOCO PRINCIPAL
-    ("TLL", "Tallinn, Estônia",              "🇪🇪"),
+    ("TLL", "Tallinn, Estônia",           "🇪🇪"),
 
     # 🌍 EUROPA
-    ("BER", "Berlim, Alemanha",              "🇩🇪"),
-    ("CDG", "Paris, França",                 "🇫🇷"),
-    ("LHR", "Londres, Reino Unido",          "🇬🇧"),
-    ("MAD", "Madri, Espanha",                "🇪🇸"),
-    ("FCO", "Roma, Itália",                  "🇮🇹"),
-    ("AMS", "Amsterdã, Holanda",             "🇳🇱"),
-    ("VIE", "Viena, Áustria",                "🇦🇹"),
-    ("PRG", "Praga, Rep. Tcheca",            "🇨🇿"),
-    ("WAW", "Varsóvia, Polônia",             "🇵🇱"),
-    ("BUD", "Budapeste, Hungria",            "🇭🇺"),
-    ("ATH", "Atenas, Grécia",               "🇬🇷"),
-    ("LIS", "Lisboa, Portugal",              "🇵🇹"),
-    ("CPH", "Copenhague, Dinamarca",         "🇩🇰"),
-    ("OSL", "Oslo, Noruega",                 "🇳🇴"),
-    ("ARN", "Estocolmo, Suécia",             "🇸🇪"),
-    ("HEL", "Helsinki, Finlândia",           "🇫🇮"),
-    ("DUB", "Dublin, Irlanda",               "🇮🇪"),
-    ("SVO", "Moscou, Rússia",                "🇷🇺"),
-    ("IST", "Istambul, Turquia",             "🇹🇷"),
-    ("OTP", "Bucareste, Romênia",            "🇷🇴"),
-    ("BEG", "Belgrado, Sérvia",              "🇷🇸"),
-    ("RIX", "Riga, Letônia",                 "🇱🇻"),
-    ("VNO", "Vilnius, Lituânia",             "🇱🇹"),
-    ("TBS", "Tbilisi, Geórgia",              "🇬🇪"),
+    ("BER", "Berlim, Alemanha",           "🇩🇪"),
+    ("CDG", "Paris, França",              "🇫🇷"),
+    ("LHR", "Londres, Reino Unido",       "🇬🇧"),
+    ("MAD", "Madri, Espanha",             "🇪🇸"),
+    ("FCO", "Roma, Itália",               "🇮🇹"),
+    ("AMS", "Amsterdã, Holanda",          "🇳🇱"),
+    ("VIE", "Viena, Áustria",             "🇦🇹"),
+    ("PRG", "Praga, Rep. Tcheca",         "🇨🇿"),
+    ("WAW", "Varsóvia, Polônia",          "🇵🇱"),
+    ("BUD", "Budapeste, Hungria",         "🇭🇺"),
+    ("ATH", "Atenas, Grécia",             "🇬🇷"),
+    ("LIS", "Lisboa, Portugal",           "🇵🇹"),
+    ("CPH", "Copenhague, Dinamarca",      "🇩🇰"),
+    ("OSL", "Oslo, Noruega",              "🇳🇴"),
+    ("ARN", "Estocolmo, Suécia",          "🇸🇪"),
+    ("HEL", "Helsinki, Finlândia",        "🇫🇮"),
+    ("DUB", "Dublin, Irlanda",            "🇮🇪"),
+    ("SVO", "Moscou, Rússia",             "🇷🇺"),
+    ("IST", "Istambul, Turquia",          "🇹🇷"),
+    ("OTP", "Bucareste, Romênia",         "🇷🇴"),
+    ("BEG", "Belgrado, Sérvia",           "🇷🇸"),
+    ("RIX", "Riga, Letônia",              "🇱🇻"),
+    ("VNO", "Vilnius, Lituânia",          "🇱🇹"),
+    ("TBS", "Tbilisi, Geórgia",           "🇬🇪"),
 
     # 🌎 AMÉRICAS
-    ("EZE", "Buenos Aires, Argentina",       "🇦🇷"),
-    ("MEX", "Cidade do México, México",      "🇲🇽"),
-    ("IAD", "Washington D.C., EUA",          "🇺🇸"),
-    ("JFK", "Nova York, EUA",                "🇺🇸"),
-    ("LAX", "Los Angeles, EUA",              "🇺🇸"),
-    ("YOW", "Ottawa, Canadá",                "🇨🇦"),
-    ("SCL", "Santiago, Chile",               "🇨🇱"),
-    ("LIM", "Lima, Peru",                    "🇵🇪"),
-    ("BOG", "Bogotá, Colômbia",              "🇨🇴"),
-    ("MVD", "Montevidéu, Uruguai",           "🇺🇾"),
-    ("PTY", "Cidade do Panamá, Panamá",      "🇵🇦"),
-    ("HAV", "Havana, Cuba",                  "🇨🇺"),
+    ("EZE", "Buenos Aires, Argentina",    "🇦🇷"),
+    ("MEX", "Cidade do México, México",   "🇲🇽"),
+    ("IAD", "Washington D.C., EUA",       "🇺🇸"),
+    ("JFK", "Nova York, EUA",             "🇺🇸"),
+    ("LAX", "Los Angeles, EUA",           "🇺🇸"),
+    ("YOW", "Ottawa, Canadá",             "🇨🇦"),
+    ("SCL", "Santiago, Chile",            "🇨🇱"),
+    ("LIM", "Lima, Peru",                 "🇵🇪"),
+    ("BOG", "Bogotá, Colômbia",           "🇨🇴"),
+    ("MVD", "Montevidéu, Uruguai",        "🇺🇾"),
+    ("PTY", "Cidade do Panamá, Panamá",   "🇵🇦"),
+    ("HAV", "Havana, Cuba",               "🇨🇺"),
 
     # 🌏 ÁSIA
-    ("NRT", "Tóquio, Japão",                 "🇯🇵"),
-    ("PEK", "Pequim, China",                 "🇨🇳"),
-    ("ICN", "Seul, Coreia do Sul",           "🇰🇷"),
-    ("DEL", "Nova Delhi, Índia",             "🇮🇳"),
-    ("BKK", "Bangkok, Tailândia",            "🇹🇭"),
-    ("SIN", "Singapura",                     "🇸🇬"),
-    ("KUL", "Kuala Lumpur, Malásia",         "🇲🇾"),
-    ("CGK", "Jacarta, Indonésia",            "🇮🇩"),
-    ("MNL", "Manila, Filipinas",             "🇵🇭"),
-    ("HAN", "Hanói, Vietnã",                 "🇻🇳"),
-    ("DXB", "Dubai, Emirados Árabes",        "🇦🇪"),
-    ("TLV", "Tel Aviv, Israel",              "🇮🇱"),
-    ("ISB", "Islamabade, Paquistão",         "🇵🇰"),
-    ("TAS", "Tashkent, Uzbequistão",         "🇺🇿"),
+    ("NRT", "Tóquio, Japão",              "🇯🇵"),
+    ("PEK", "Pequim, China",              "🇨🇳"),
+    ("ICN", "Seul, Coreia do Sul",        "🇰🇷"),
+    ("DEL", "Nova Delhi, Índia",          "🇮🇳"),
+    ("BKK", "Bangkok, Tailândia",         "🇹🇭"),
+    ("SIN", "Singapura",                  "🇸🇬"),
+    ("KUL", "Kuala Lumpur, Malásia",      "🇲🇾"),
+    ("CGK", "Jacarta, Indonésia",         "🇮🇩"),
+    ("MNL", "Manila, Filipinas",          "🇵🇭"),
+    ("HAN", "Hanói, Vietnã",              "🇻🇳"),
+    ("DXB", "Dubai, Emirados Árabes",     "🇦🇪"),
+    ("TLV", "Tel Aviv, Israel",           "🇮🇱"),
+    ("ISB", "Islamabade, Paquistão",      "🇵🇰"),
+    ("TAS", "Tashkent, Uzbequistão",      "🇺🇿"),
 
     # 🌍 ÁFRICA
-    ("CAI", "Cairo, Egito",                  "🇪🇬"),
-    ("NBO", "Nairóbi, Quênia",               "🇰🇪"),
-    ("JNB", "Joanesburgo, África do Sul",    "🇿🇦"),
-    ("LOS", "Lagos, Nigéria",                "🇳🇬"),
-    ("ACC", "Acra, Gana",                    "🇬🇭"),
-    ("CMN", "Casablanca, Marrocos",          "🇲🇦"),
-    ("ADD", "Adis Abeba, Etiópia",           "🇪🇹"),
-    ("LAD", "Luanda, Angola",                "🇦🇴"),
-    ("MPM", "Maputo, Moçambique",            "🇲🇿"),
+    ("CAI", "Cairo, Egito",               "🇪🇬"),
+    ("NBO", "Nairóbi, Quênia",            "🇰🇪"),
+    ("JNB", "Joanesburgo, África do Sul", "🇿🇦"),
+    ("LOS", "Lagos, Nigéria",             "🇳🇬"),
+    ("ACC", "Acra, Gana",                 "🇬🇭"),
+    ("CMN", "Casablanca, Marrocos",       "🇲🇦"),
+    ("ADD", "Adis Abeba, Etiópia",        "🇪🇹"),
+    ("LAD", "Luanda, Angola",             "🇦🇴"),
+    ("MPM", "Maputo, Moçambique",         "🇲🇿"),
 
     # 🌏 OCEANIA
-    ("SYD", "Sydney, Austrália",             "🇦🇺"),
-    ("AKL", "Auckland, Nova Zelândia",       "🇳🇿"),
+    ("SYD", "Sydney, Austrália",          "🇦🇺"),
+    ("AKL", "Auckland, Nova Zelândia",    "🇳🇿"),
 ]
 
 # ============================================================
@@ -110,54 +112,58 @@ def enviar_telegram(mensagem):
         else:
             print(f"[{datetime.now()}] ❌ Erro Telegram: {r.text}")
     except Exception as e:
-        print(f"[{datetime.now()}] ❌ Erro de conexão: {e}")
+        print(f"[{datetime.now()}] ❌ Erro de conexão Telegram: {e}")
 
 
 def buscar_melhor_oferta(codigo_iata, nome_cidade, emoji):
-    hoje = datetime.today()
+    """
+    Usa a Flight Data API (v2/prices/month-matrix) — disponível no plano gratuito.
+    Retorna os preços mínimos por mês para a rota, sem precisar de data exata.
+    """
     melhor = None
+    try:
+        url = "https://api.travelpayouts.com/v2/prices/month-matrix"
+        params = {
+            "origin":      ORIGEM,
+            "destination": codigo_iata,
+            "currency":    "brl",
+            "show_to_affiliates": "true",
+            "token":       TRAVEL_TOKEN
+        }
+        r = requests.get(url, params=params, timeout=15)
+        print(f"  [{codigo_iata}] status={r.status_code}")
 
-    for semanas in range(4, 26, 3):
-        data_str = (hoje + timedelta(weeks=semanas)).strftime("%Y-%m-%d")
-        try:
-            url = "https://api.travelpayouts.com/aviasales/v3/prices_for_dates"
-            params = {
-                "origin": ORIGEM,
-                "destination": codigo_iata,
-                "departure_at": data_str,
-                "one_way": "false",
-                "direct": "false",
-                "limit": 1,
-                "sorting": "price",
-                "currency": "brl",
-                "token": os.getenv("TRAVEL_TOKEN")
-            }
-            r = requests.get(url, params=params, timeout=15)
-            if r.status_code == 200:
-                dados = r.json()
-                if dados.get("data"):
-                    voo = dados["data"][0]
-                    preco = voo.get("price", 999999)
-                    if preco <= PRECO_MAXIMO and (melhor is None or preco < melhor["preco"]):
+        if r.status_code == 200:
+            dados = r.json()
+            # A API retorna lista em dados["data"]
+            lista = dados.get("data") or []
+            for item in lista:
+                preco = item.get("price", 999999)
+                if preco <= PRECO_MAXIMO:
+                    if melhor is None or preco < melhor["preco"]:
                         melhor = {
-                            "destino": nome_cidade,
-                            "emoji": emoji,
-                            "preco": preco,
-                            "data_ida": voo.get("departure_at", data_str)[:10],
-                            "data_volta": voo.get("return_at", "—"),
-                            "cia": voo.get("airline", "—"),
-                            "link": voo.get("link", "")
+                            "destino":    nome_cidade,
+                            "emoji":      emoji,
+                            "preco":      preco,
+                            "data_ida":   item.get("depart_date", "—"),
+                            "data_volta": item.get("return_date", "—"),
+                            "cia":        item.get("airline", "—"),
+                            "link":       item.get("link", "")
                         }
-            time.sleep(0.4)
-        except Exception as e:
-            print(f"  ⚠️ Erro em {nome_cidade}: {e}")
+        else:
+            print(f"  [{codigo_iata}] Resposta: {r.text[:200]}")
+
+        time.sleep(0.5)
+
+    except Exception as e:
+        print(f"  ⚠️ Erro em {nome_cidade}: {e}")
 
     return melhor
 
 
 def verificar_todos():
     total = len(DESTINOS)
-    print(f"\n[{datetime.now()}] 🔍 Verificando {total} destinos...")
+    print(f"\n[{datetime.now()}] 🔍 Iniciando verificação de {total} destinos...")
     ofertas = []
 
     for i, (cod, nome, emoji) in enumerate(DESTINOS, 1):
@@ -166,23 +172,24 @@ def verificar_todos():
         if oferta:
             ofertas.append(oferta)
 
+    print(f"[{datetime.now()}] 📊 {len(ofertas)} oferta(s) encontrada(s) abaixo de R${PRECO_MAXIMO}.")
+
     if not ofertas:
-        print(f"[{datetime.now()}] Nenhuma oferta abaixo de R${PRECO_MAXIMO}.")
         enviar_telegram(
             f"🔍 <b>Verificação concluída</b>\n\n"
-            f"Nenhuma passagem abaixo de R$ {PRECO_MAXIMO} no momento.\n"
+            f"Nenhuma passagem abaixo de R$ {PRECO_MAXIMO:,} no momento.\n"
             f"Próxima verificação em {VERIFICAR_HORAS}h. ⏰"
         )
         return
 
     ofertas.sort(key=lambda x: x["preco"])
     tallinn = next((o for o in ofertas if "Tallinn" in o["destino"]), None)
-    outras = [o for o in ofertas if "Tallinn" not in o["destino"]]
+    outras  = [o for o in ofertas if "Tallinn" not in o["destino"]]
 
     msg = (
         f"✈️ <b>ALERTAS DE PASSAGENS</b>\n"
         f"🗓 {datetime.now().strftime('%d/%m/%Y às %H:%M')}\n"
-        f"💰 Limite: R$ {PRECO_MAXIMO} | {len(ofertas)} oferta(s)\n"
+        f"💰 Limite: R$ {PRECO_MAXIMO:,} | {len(ofertas)} oferta(s)\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
     )
 
@@ -211,7 +218,7 @@ def verificar_todos():
 
     msg += "━━━━━━━━━━━━━━━━━━━━\n🤖 Monitor automático de passagens"
     enviar_telegram(msg)
-    print(f"[{datetime.now()}] ✅ {len(ofertas)} oferta(s) enviada(s).")
+    print(f"[{datetime.now()}] ✅ Alertas enviados no Telegram!")
 
 
 # ============================================================
@@ -220,15 +227,16 @@ def verificar_todos():
 if __name__ == "__main__":
     print("=" * 55)
     print(f"✈️  Monitor de Passagens — VDC → Mundo todo")
-    print(f"    {len(DESTINOS)} destinos | Limite R$ {PRECO_MAXIMO}")
+    print(f"    {len(DESTINOS)} destinos | Limite R$ {PRECO_MAXIMO:,}")
     print("=" * 55)
 
+    # Testa conexão com Telegram logo de cara
     enviar_telegram(
         "🚀 <b>Monitor de passagens iniciado!</b>\n\n"
         f"🛫 Origem: Vitória da Conquista (VDC)\n"
         f"🌍 Destinos monitorados: <b>{len(DESTINOS)} capitais</b>\n"
         f"⭐ Foco principal: Tallinn, Estônia 🇪🇪\n"
-        f"💰 Alerta se preço ≤ R$ {PRECO_MAXIMO}\n"
+        f"💰 Alerta se preço ≤ R$ {PRECO_MAXIMO:,}\n"
         f"🕐 Verificação a cada {VERIFICAR_HORAS}h\n\n"
         "Você receberá alertas das melhores ofertas! ✅"
     )
