@@ -98,23 +98,29 @@ DESTINOS = [
 #  FUNÇÕES
 # ============================================================
 
+DESTINATARIOS = [
+    TELEGRAM_CHAT_ID,   # você
+    "6170699300",       # amigo 1
+    "5938670130",       # amigo 2
+]
+
 def enviar_telegram(mensagem):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": mensagem,
-        "parse_mode": "HTML"
-    }
-    try:
-        r = requests.post(url, json=payload, timeout=10)
-        if r.status_code == 200:
-            print(f"[{datetime.now()}] ✅ Telegram enviado!")
-        else:
-            print(f"[{datetime.now()}] ❌ Erro Telegram: {r.text}")
-    except Exception as e:
-        print(f"[{datetime.now()}] ❌ Erro de conexão Telegram: {e}")
-
-
+    for chat_id in DESTINATARIOS:
+        payload = {
+            "chat_id": chat_id,
+            "text": mensagem,
+            "parse_mode": "HTML"
+        }
+        try:
+            r = requests.post(url, json=payload, timeout=10)
+            if r.status_code == 200:
+                print(f"[{datetime.now()}] ✅ Enviado para {chat_id}!")
+            else:
+                print(f"[{datetime.now()}] ❌ Erro para {chat_id}: {r.text}")
+        except Exception as e:
+            print(f"[{datetime.now()}] ❌ Erro de conexão {chat_id}: {e}")
+        time.sleep(0.3)
 def buscar_melhor_oferta(codigo_iata, nome_cidade, emoji):
     """
     Usa a Flight Data API (v2/prices/month-matrix) — disponível no plano gratuito.
