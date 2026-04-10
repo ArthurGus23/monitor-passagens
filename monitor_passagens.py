@@ -25,12 +25,13 @@ ORIGEM             = os.getenv("ORIGEM", "GRU")
 PRECO_MAXIMO_PAD   = int(os.getenv("PRECO_MAXIMO_PADRAO", "20000"))
 VERIFICAR_HORAS    = int(os.getenv("VERIFICAR_HORAS", "6"))
 DATA_FILE          = os.getenv("DATA_FILE", "users.json")
-QUEDA_PERCENTUAL   = 15  # % para disparar alerta de queda
- 
-# Usuários iniciais já cadastrados
-USUARIOS_INICIAIS = ["1680681945", "6170699300", "5938670130", "1533193177", "1812523936"]
+QUEDA_PERCENTUAL   = 15   # % para disparar alerta de queda
+DURACAO_VIAGEM     = 14   # dias de estadia para ida e volta (padrão)
  
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+ 
+# Usuários iniciais já cadastrados
+USUARIOS_INICIAIS = ["1680681945", "6170699300", "5938670130"]
  
 # ============================================================
 #  DESTINOS DISPONÍVEIS
@@ -109,17 +110,14 @@ DESTINOS = [
     ("AKL", "Auckland, Nova Zelândia",              "🇳🇿"),
 ]
  
-DESTINOS_MAP = {cod: (cod, nome, emoji) for cod, nome, emoji in DESTINOS}
+DESTINOS_MAP    = {cod: (cod, nome, emoji) for cod, nome, emoji in DESTINOS}
 DESTINOS_PADRAO = ["DUB", "FRA", "IST", "ARN", "HEL", "RIX", "WAW"]
  
 # ============================================================
 #  PERSISTÊNCIA
 # ============================================================
 data_lock = threading.RLock()
-state = {
-    "users": {},
-    "ofertas_semana": [],
-}
+state = {"users": {}, "ofertas_semana": []}
  
  
 def carregar_dados():
@@ -134,7 +132,6 @@ def carregar_dados():
         except Exception as e:
             print(f"[{datetime.now()}] ⚠️ Erro ao carregar {DATA_FILE}: {e}")
  
-    # Garante que os usuários iniciais já existam
     for cid in USUARIOS_INICIAIS:
         if cid not in state["users"]:
             state["users"][cid] = novo_usuario(cid)
@@ -150,7 +147,7 @@ def salvar_dados():
                 json.dump(state, f, ensure_ascii=False, indent=2)
             os.replace(tmp, DATA_FILE)
         except Exception as e:
-            print(f"[{datetime.now()}] ⚠️ Erro ao salvar {DATA_FILE}: {e}")
+            print(f"[{datetime.now()}] ⚠️ Erro ao salvar: {e}")
  
  
 def novo_usuario(chat_id, nome=""):
@@ -161,6 +158,7 @@ def novo_usuario(chat_id, nome=""):
         "destinos":     list(DESTINOS_PADRAO),
         "favorito":     "DUB",
         "meses":        [],
+        "duracao":      DURACAO_VIAGEM,   # dias de estadia ida e volta
         "pausado":      False,
         "ultimo_preco": {},
         "criado_em":    datetime.now().isoformat(timespec="seconds"),
@@ -181,7 +179,7 @@ def get_user(chat_id, nome=""):
 # ============================================================
  
 def enviar_telegram(chat_id, mensagem, disable_preview=True):
-    url = f"{TELEGRAM_API}/sendMessage"
+    url     = f"{TELEGRAM_API}/sendMessage"
     payload = {
         "chat_id":                  str(chat_id),
         "text":                     mensagem,
@@ -192,20 +190,10 @@ def enviar_telegram(chat_id, mensagem, disable_preview=True):
         r = requests.post(url, json=payload, timeout=15)
         if r.status_code == 200:
             return True
-        print(f"[{datetime.now()}] ❌ Erro Telegram {chat_id}: {r.text}")
+        print(f"[{datetime.now()}] ❌ Telegram {chat_id}: {r.text}")
     except Exception as e:
-        print(f"[{datetime.now()}] ❌ Conexão Telegram {chat_id}: {e}")
+        print(f"[{datetime.now()}] ❌ Conexão {chat_id}: {e}")
     return False
- 
- 
-def broadcast(mensagem, somente_ativos=True):
-    with data_lock:
-        usuarios = list(state["users"].values())
-    for u in usuarios:
-        if somente_ativos and u.get("pausado"):
-            continue
-        enviar_telegram(u["chat_id"], mensagem)
-        time.sleep(0.3)
  
  
 # ============================================================
@@ -222,21 +210,26 @@ def montar_link_kayak(origem, destino, data_ida, data_volta):
     return f"https://www.kayak.com.br/flights/{origem}-{destino}"
  
  
-def buscar_ofertas_destino(codigo_iata):
+def buscar_ofertas_destino(codigo_iata, duracao=DURACAO_VIAGEM):
+    """
+    Busca ida e volta usando trip_duration.
+    A API retorna preços em cache — podem diferir do valor real no site.
+    """
     try:
-        url = "https://api.travelpayouts.com/v2/prices/month-matrix"
+        url    = "https://api.travelpayouts.com/v2/prices/month-matrix"
         params = {
             "origin":             ORIGEM,
             "destination":        codigo_iata,
             "currency":           "brl",
             "show_to_affiliates": "true",
             "token":              TRAVEL_TOKEN,
+            "trip_duration":      duracao,   # ← ida e volta com N dias de estadia
         }
         r = requests.get(url, params=params, timeout=20)
         if r.status_code != 200:
             print(f"  [{codigo_iata}] HTTP {r.status_code}")
             return []
-        lista = r.json().get("data") or []
+        lista   = r.json().get("data") or []
         ofertas = []
         for item in lista:
             preco = item.get("value")
@@ -247,7 +240,7 @@ def buscar_ofertas_destino(codigo_iata):
             ofertas.append({
                 "iata":       codigo_iata,
                 "preco":      float(preco),
-                "data_ida":   data_ida or "—",
+                "data_ida":   data_ida   or "—",
                 "data_volta": data_volta or "—",
                 "cia":        item.get("gate") or "—",
                 "link":       montar_link_kayak(ORIGEM, codigo_iata, data_ida, data_volta),
@@ -274,10 +267,12 @@ def filtrar_por_meses(ofertas, meses):
  
  
 def melhor_oferta_para_usuario(usuario, codigo_iata, cache):
-    if codigo_iata not in cache:
-        cache[codigo_iata] = buscar_ofertas_destino(codigo_iata)
+    duracao  = usuario.get("duracao", DURACAO_VIAGEM)
+    cache_key = f"{codigo_iata}_{duracao}"
+    if cache_key not in cache:
+        cache[cache_key] = buscar_ofertas_destino(codigo_iata, duracao)
         time.sleep(0.4)
-    ofertas = filtrar_por_meses(cache[codigo_iata], usuario.get("meses") or [])
+    ofertas = filtrar_por_meses(cache[cache_key], usuario.get("meses") or [])
     ofertas = [o for o in ofertas if o["preco"] <= usuario["preco_max"]]
     return ofertas[0] if ofertas else None
  
@@ -286,18 +281,24 @@ def melhor_oferta_para_usuario(usuario, codigo_iata, cache):
 #  FORMATAÇÃO
 # ============================================================
  
+AVISO_PRECO = "⚠️ <i>Preço estimado (cache). Valor real pode variar — confirme no Kayak.</i>"
+ 
 def fmt_oferta(o, prefix=""):
     cod = o["iata"]
     _, nome, emoji = DESTINOS_MAP.get(cod, (cod, cod, "✈️"))
-    linha = (
-        f"{prefix}{emoji} <b>{nome}</b> — R$ {o['preco']:,.0f}\n"
-        f"   📅 {o['data_ida']}"
-    )
+ 
+    # Monta linha de datas
     if o.get("data_volta") and o["data_volta"] != "—":
-        linha += f" → {o['data_volta']}"
-    linha += f" | 🏢 {o['cia']}\n"
-    linha += f"   🔗 <a href='{o['link']}'>Buscar no Kayak</a>\n"
-    return linha
+        datas = f"✈️ Ida: {o['data_ida']}  🔄 Volta: {o['data_volta']}"
+    else:
+        datas = f"✈️ Ida: {o['data_ida']}"
+ 
+    return (
+        f"{prefix}{emoji} <b>{nome}</b>\n"
+        f"   💵 ~R$ {o['preco']:,.0f} (ida e volta) | 🏢 {o['cia']}\n"
+        f"   {datas}\n"
+        f"   🔗 <a href='{o['link']}'>Confirmar preço no Kayak</a>\n"
+    )
  
  
 def montar_mensagem_alertas(usuario, ofertas, quedas):
@@ -305,11 +306,13 @@ def montar_mensagem_alertas(usuario, ofertas, quedas):
     fav_oferta = next((o for o in ofertas if o["iata"] == favorito), None)
     hubs       = [o for o in ofertas if "hub" in DESTINOS_MAP.get(o["iata"], (None,"",""))[1] and o["iata"] != favorito]
     outras     = [o for o in ofertas if "hub" not in DESTINOS_MAP.get(o["iata"], (None,"",""))[1] and o["iata"] != favorito]
+    duracao    = usuario.get("duracao", DURACAO_VIAGEM)
  
     msg = (
         f"✈️ <b>ALERTAS DE PASSAGENS</b>\n"
         f"🗓 {datetime.now().strftime('%d/%m/%Y às %H:%M')}\n"
-        f"💰 Limite: R$ {usuario['preco_max']:,} | {len(ofertas)} oferta(s)\n"
+        f"💰 Limite: ~R$ {usuario['preco_max']:,} | {len(ofertas)} oferta(s) | {duracao} dias\n"
+        f"{AVISO_PRECO}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
     )
  
@@ -320,27 +323,19 @@ def montar_mensagem_alertas(usuario, ofertas, quedas):
             _, nome, emoji = DESTINOS_MAP.get(cod, (cod, cod, "✈️"))
             msg += (
                 f"{emoji} <b>{nome}</b>\n"
-                f"   📉 R$ {q['anterior']:,.0f} → <b>R$ {q['oferta']['preco']:,.0f}</b> "
+                f"   📉 ~R$ {q['anterior']:,.0f} → <b>~R$ {q['oferta']['preco']:,.0f}</b> "
                 f"(-{q['percentual']:.0f}%)\n"
-                f"   🔗 <a href='{q['oferta']['link']}'>Buscar no Kayak</a>\n"
+                f"   🔗 <a href='{q['oferta']['link']}'>Confirmar no Kayak</a>\n"
             )
         msg += "\n━━━━━━━━━━━━━━━━━━━━\n\n"
  
     if fav_oferta:
         _, nome, emoji = DESTINOS_MAP.get(favorito, (favorito, favorito, "⭐"))
-        msg += (
-            f"⭐ <b>SEU FAVORITO</b>\n"
-            f"{emoji} <b>{nome}</b>\n"
-            f"   💵 <b>R$ {fav_oferta['preco']:,.0f}</b>\n"
-            f"   📅 Ida: {fav_oferta['data_ida']}"
-        )
-        if fav_oferta["data_volta"] != "—":
-            msg += f" → Volta: {fav_oferta['data_volta']}"
-        msg += (
-            f"\n   🏢 {fav_oferta['cia']}\n"
-            f"   🔗 <a href='{fav_oferta['link']}'>Buscar no Kayak</a>\n"
-            f"\n━━━━━━━━━━━━━━━━━━━━\n\n"
-        )
+        msg += f"⭐ <b>SEU FAVORITO</b>\n"
+        msg += fmt_oferta(fav_oferta)
+        if favorito == "DUB":
+            msg += "   💡 De Dublin → Tallinn por ~€50-150\n"
+        msg += "\n━━━━━━━━━━━━━━━━━━━━\n\n"
  
     if hubs:
         msg += "🔵 <b>HUBS COM VOO PARA TALLINN</b>\n\n"
@@ -366,8 +361,8 @@ def montar_mensagem_alertas(usuario, ofertas, quedas):
 def verificar_para_usuario(usuario, cache):
     if usuario.get("pausado"):
         return None
-    ofertas = []
-    quedas  = []
+    ofertas      = []
+    quedas       = []
     novos_precos = {}
  
     for cod in usuario["destinos"]:
@@ -407,7 +402,7 @@ def verificar_todos():
     cache = {}
     for usuario in usuarios:
         try:
-            print(f"  → Usuário {usuario['chat_id']} ({len(usuario['destinos'])} destinos)")
+            print(f"  → {usuario['chat_id']} ({len(usuario['destinos'])} destinos, {usuario.get('duracao', DURACAO_VIAGEM)} dias)")
             with data_lock:
                 vivo = state["users"].get(usuario["chat_id"])
                 if not vivo:
@@ -417,7 +412,7 @@ def verificar_todos():
                 enviar_telegram(
                     usuario["chat_id"],
                     f"🔍 <b>Verificação concluída</b>\n\n"
-                    f"Nenhuma passagem abaixo de R$ {usuario['preco_max']:,} no momento.\n"
+                    f"Nenhuma passagem abaixo de ~R$ {usuario['preco_max']:,} no momento.\n"
                     f"Próxima verificação em {VERIFICAR_HORAS}h. ⏰"
                 )
                 continue
@@ -434,7 +429,7 @@ def verificar_todos():
                     state["ofertas_semana"] = state["ofertas_semana"][-5000:]
                 salvar_dados()
         except Exception as e:
-            print(f"  ⚠️ Erro processando {usuario['chat_id']}: {e}")
+            print(f"  ⚠️ Erro {usuario['chat_id']}: {e}")
  
     print(f"[{datetime.now()}] ✅ Verificação concluída.")
  
@@ -458,23 +453,21 @@ def resumo_semanal():
             continue
         ofertas = by_user.get(u["chat_id"], [])
         if not ofertas:
-            enviar_telegram(
-                u["chat_id"],
+            enviar_telegram(u["chat_id"],
                 "📅 <b>RESUMO SEMANAL</b>\n\n"
                 "Nenhuma oferta capturada esta semana dentro do seu limite.\n"
-                "Use /preco para ajustar seu teto. ✈️"
-            )
+                "Use /preco para ajustar seu teto. ✈️")
             continue
         melhores = {}
         for o in ofertas:
-            atual = melhores.get(o["iata"])
-            if not atual or o["preco"] < atual["preco"]:
+            if not melhores.get(o["iata"]) or o["preco"] < melhores[o["iata"]]["preco"]:
                 melhores[o["iata"]] = o
         ranking = sorted(melhores.values(), key=lambda x: x["preco"])[:10]
         msg = (
             f"📅 <b>RESUMO SEMANAL</b>\n"
             f"🗓 {datetime.now().strftime('%d/%m/%Y')}\n"
             f"💎 Top {len(ranking)} ofertas da semana\n"
+            f"{AVISO_PRECO}\n"
             f"━━━━━━━━━━━━━━━━━━━━\n\n"
         )
         for i, o in enumerate(ranking, 1):
@@ -494,17 +487,21 @@ def resumo_semanal():
  
 MENU = (
     "🤖 <b>Menu de comandos</b>\n\n"
-    "/start — cadastra você no bot\n"
-    "/preco 5000 — define seu preço máximo (R$)\n"
-    "/destinos — lista todos os destinos disponíveis\n"
-    "/ativar DUB LIS CDG — ativa destinos\n"
-    "/desativar DUB — desativa um destino\n"
+    "⚙️ <b>Configurações</b>\n"
+    "/preco 8000 — define preço máximo (~R$)\n"
+    "/duracao 10 — dias de estadia ida e volta (padrão: 14)\n"
     "/favorito DUB — define destino favorito\n"
-    "/meses 6 7 8 — filtra meses (vazio = todos)\n"
-    "/meus — mostra suas configurações\n"
-    "/buscar — força uma busca imediata\n"
-    "/pausar — pausa alertas\n"
-    "/retomar — retoma alertas\n"
+    "/meses 6 7 8 — filtra meses (vazio = todos)\n\n"
+    "🌍 <b>Destinos</b>\n"
+    "/destinos — lista todos disponíveis\n"
+    "/ativar DUB LIS CDG — ativa destinos\n"
+    "/desativar DUB — desativa um destino\n\n"
+    "🔍 <b>Buscas</b>\n"
+    "/buscar — força busca imediata\n"
+    "/meus — suas configurações atuais\n\n"
+    "🔔 <b>Alertas</b>\n"
+    "/pausar — pausa os alertas\n"
+    "/retomar — retoma os alertas\n\n"
     "/ajuda — mostra este menu"
 )
  
@@ -513,31 +510,45 @@ def cmd_start(usuario, args):
     salvar_dados()
     return (
         f"🚀 <b>Bem-vindo ao Monitor de Passagens PRO!</b>\n\n"
-        f"Você foi cadastrado. Suas configurações iniciais:\n"
-        f"💰 Preço máximo: R$ {usuario['preco_max']:,}\n"
-        f"⭐ Favorito: {usuario['favorito']} (Dublin)\n"
+        f"Você foi cadastrado. Configurações iniciais:\n"
+        f"💰 Preço máximo: ~R$ {usuario['preco_max']:,}\n"
+        f"⭐ Favorito: DUB (Dublin)\n"
+        f"🗓 Duração: {usuario.get('duracao', DURACAO_VIAGEM)} dias (ida e volta)\n"
         f"🌍 Destinos ativos: {len(usuario['destinos'])}\n\n"
-        f"Use /ajuda para ver todos os comandos.\n"
-        f"Use /buscar para uma busca imediata. ✈️"
+        f"Use /ajuda para ver todos os comandos. ✈️"
     )
  
  
 def cmd_preco(usuario, args):
     if not args:
-        return f"💰 Seu preço máximo atual é <b>R$ {usuario['preco_max']:,}</b>.\nUse: /preco 5000"
+        return f"💰 Seu preço máximo atual: <b>~R$ {usuario['preco_max']:,}</b>\nUse: /preco 8000"
     try:
         valor = int(args[0].replace(".", "").replace(",", ""))
         if valor < 100:
-            return "⚠️ Valor muito baixo. Use algo como /preco 5000"
+            return "⚠️ Valor muito baixo. Ex: /preco 8000"
         usuario["preco_max"] = valor
         salvar_dados()
-        return f"✅ Preço máximo atualizado para <b>R$ {valor:,}</b>."
+        return f"✅ Preço máximo atualizado para <b>~R$ {valor:,}</b>."
     except ValueError:
-        return "⚠️ Formato inválido. Exemplo: /preco 5000"
+        return "⚠️ Formato inválido. Ex: /preco 8000"
+ 
+ 
+def cmd_duracao(usuario, args):
+    if not args:
+        return f"🗓 Duração atual: <b>{usuario.get('duracao', DURACAO_VIAGEM)} dias</b>\nUse: /duracao 10"
+    try:
+        dias = int(args[0])
+        if dias < 1 or dias > 90:
+            return "⚠️ Use entre 1 e 90 dias."
+        usuario["duracao"] = dias
+        salvar_dados()
+        return f"✅ Duração atualizada para <b>{dias} dias</b> de estadia."
+    except ValueError:
+        return "⚠️ Formato inválido. Ex: /duracao 10"
  
  
 def cmd_destinos(usuario, args):
-    msg = "🌍 <b>Destinos disponíveis</b>\n\n"
+    msg = "🌍 <b>Destinos disponíveis</b>\n✅ = ativo  ⬜ = inativo\n\n"
     for cod, nome, emoji in DESTINOS:
         marca = "✅" if cod in usuario["destinos"] else "⬜"
         msg += f"{marca} <code>{cod}</code> {emoji} {nome}\n"
@@ -557,10 +568,8 @@ def cmd_ativar(usuario, args):
             adicionados.append(c)
     salvar_dados()
     out = ""
-    if adicionados:
-        out += f"✅ Ativados: {', '.join(adicionados)}\n"
-    if invalidos:
-        out += f"⚠️ Inválidos: {', '.join(invalidos)}\n"
+    if adicionados: out += f"✅ Ativados: {', '.join(adicionados)}\n"
+    if invalidos:   out += f"⚠️ Inválidos: {', '.join(invalidos)}\n"
     return out.strip() or "Nenhuma alteração."
  
  
@@ -577,16 +586,14 @@ def cmd_desativar(usuario, args):
             ausentes.append(c)
     salvar_dados()
     out = ""
-    if removidos:
-        out += f"❌ Desativados: {', '.join(removidos)}\n"
-    if ausentes:
-        out += f"⚠️ Não estavam ativos: {', '.join(ausentes)}\n"
+    if removidos: out += f"❌ Desativados: {', '.join(removidos)}\n"
+    if ausentes:  out += f"⚠️ Não estavam ativos: {', '.join(ausentes)}\n"
     return out.strip() or "Nenhuma alteração."
  
  
 def cmd_favorito(usuario, args):
     if not args:
-        return f"⭐ Seu favorito atual: <b>{usuario.get('favorito') or '—'}</b>\nUse: /favorito DUB"
+        return f"⭐ Favorito atual: <b>{usuario.get('favorito','—')}</b>\nUse: /favorito DUB"
     c = args[0].upper()
     if c not in DESTINOS_MAP:
         return f"⚠️ Código inválido: {c}"
@@ -602,8 +609,8 @@ def cmd_meses(usuario, args):
     if not args:
         atuais = usuario.get("meses") or []
         if not atuais:
-            return "📆 Nenhum filtro de mês ativo (todos os meses).\nUse: /meses 6 7 8"
-        return f"📆 Meses ativos: {', '.join(map(str, atuais))}\nUse /meses sem números para limpar."
+            return "📆 Sem filtro de mês (todos os meses).\nUse: /meses 6 7 8"
+        return f"📆 Meses ativos: {', '.join(map(str, atuais))}"
     meses = []
     for a in args:
         try:
@@ -616,7 +623,7 @@ def cmd_meses(usuario, args):
     salvar_dados()
     if not usuario["meses"]:
         return "📆 Filtro de meses removido (todos os meses)."
-    return f"📆 Filtro atualizado: meses {', '.join(map(str, usuario['meses']))}"
+    return f"📆 Filtro: meses {', '.join(map(str, usuario['meses']))}"
  
  
 def cmd_meus(usuario, args):
@@ -624,9 +631,11 @@ def cmd_meus(usuario, args):
     meses_txt = ", ".join(map(str, meses)) if meses else "todos"
     favorito  = usuario.get("favorito") or "—"
     nome_fav  = DESTINOS_MAP.get(favorito, (favorito, favorito, ""))[1]
+    duracao   = usuario.get("duracao", DURACAO_VIAGEM)
     return (
         f"⚙️ <b>Suas configurações</b>\n\n"
-        f"💰 Preço máximo: R$ {usuario['preco_max']:,}\n"
+        f"💰 Preço máximo: ~R$ {usuario['preco_max']:,}\n"
+        f"🗓 Duração (ida e volta): {duracao} dias\n"
         f"⭐ Favorito: {favorito} — {nome_fav}\n"
         f"📆 Meses: {meses_txt}\n"
         f"🌍 Destinos ativos ({len(usuario['destinos'])}):\n"
@@ -636,11 +645,11 @@ def cmd_meus(usuario, args):
  
  
 def cmd_buscar(usuario, args):
-    enviar_telegram(usuario["chat_id"], "🔍 Buscando agora… isso pode levar alguns segundos.")
-    cache = {}
+    enviar_telegram(usuario["chat_id"], "🔍 Buscando agora… pode levar alguns segundos.")
+    cache     = {}
     resultado = verificar_para_usuario(usuario, cache)
     if not resultado:
-        return f"Nenhuma oferta abaixo de R$ {usuario['preco_max']:,} no momento."
+        return f"Nenhuma oferta abaixo de ~R$ {usuario['preco_max']:,} no momento."
     msg = montar_mensagem_alertas(usuario, resultado["ofertas"], resultado["quedas"])
     enviar_telegram(usuario["chat_id"], msg)
     return None
@@ -665,6 +674,7 @@ def cmd_ajuda(usuario, args):
 COMANDOS = {
     "start":     cmd_start,
     "preco":     cmd_preco,
+    "duracao":   cmd_duracao,
     "destinos":  cmd_destinos,
     "ativar":    cmd_ativar,
     "desativar": cmd_desativar,
@@ -692,11 +702,10 @@ def processar_update(update):
     if not texto.startswith("/"):
         return
  
-    partes = texto.split()
-    cmd    = partes[0][1:].split("@")[0].lower()
-    args   = partes[1:]
- 
-    nome = (chat.get("first_name") or "") + (" " + chat.get("last_name") if chat.get("last_name") else "")
+    partes  = texto.split()
+    cmd     = partes[0][1:].split("@")[0].lower()
+    args    = partes[1:]
+    nome    = (chat.get("first_name") or "") + (" " + chat.get("last_name") if chat.get("last_name") else "")
     usuario = get_user(chat_id, nome.strip())
  
     handler = COMANDOS.get(cmd)
@@ -717,7 +726,7 @@ def processar_update(update):
 # ============================================================
  
 def telegram_polling():
-    print(f"[{datetime.now()}] 📡 Iniciando polling do Telegram...")
+    print(f"[{datetime.now()}] 📡 Polling iniciado...")
     offset = None
     while True:
         try:
@@ -764,7 +773,7 @@ def scheduler_loop():
 def main():
     print("=" * 60)
     print(f"✈️  Monitor de Passagens PRO — {ORIGEM} → Mundo")
-    print(f"    {len(DESTINOS)} destinos | Limite padrão R$ {PRECO_MAXIMO_PAD:,}")
+    print(f"    {len(DESTINOS)} destinos | Padrão ~R$ {PRECO_MAXIMO_PAD:,} | {DURACAO_VIAGEM} dias")
     print(f"    🔁 Verificação a cada {VERIFICAR_HORAS}h")
     print("=" * 60)
  
@@ -774,21 +783,21 @@ def main():
         ADMIN_CHAT_ID,
         "🚀 <b>Monitor PRO online!</b>\n\n"
         f"🛫 Origem: {ORIGEM}\n"
-        f"🌍 Destinos disponíveis: <b>{len(DESTINOS)}</b>\n"
-        f"👥 Usuários cadastrados: <b>{len(state['users'])}</b>\n"
+        f"🌍 Destinos: <b>{len(DESTINOS)}</b>\n"
+        f"👥 Usuários: <b>{len(state['users'])}</b>\n"
+        f"🗓 Duração padrão: {DURACAO_VIAGEM} dias (ida e volta)\n"
         f"⏰ Verificação a cada {VERIFICAR_HORAS}h\n"
         f"📅 Resumo semanal: dom 09:00\n\n"
-        "Peça aos novos usuários enviarem /start ao bot. ✅"
+        f"{AVISO_PRECO}\n\n"
+        "Novos usuários: enviem /start ao bot. ✅"
     )
  
     if state["users"]:
         threading.Thread(target=verificar_todos, daemon=True).start()
  
     threading.Thread(target=scheduler_loop, daemon=True).start()
- 
     telegram_polling()
  
  
 if __name__ == "__main__":
     main()
- 
