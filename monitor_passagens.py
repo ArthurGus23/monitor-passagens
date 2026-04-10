@@ -28,7 +28,7 @@ DATA_FILE          = os.getenv("DATA_FILE", "users.json")
 QUEDA_PERCENTUAL   = 15  # % para disparar alerta de queda
  
 # Usuários iniciais já cadastrados
-USUARIOS_INICIAIS = ["1680681945", "6170699300", "5938670130"]
+USUARIOS_INICIAIS = ["1680681945", "6170699300", "5938670130", "1533193177", "1812523936"]
  
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
  
