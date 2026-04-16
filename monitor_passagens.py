@@ -433,20 +433,22 @@ def teclado_favorito(usuario):
 def extrair_preco(dados):
     """
     Extrai o menor preço da resposta da FlightAPI.
-    A API retorna uma estrutura com 'itineraries', 'legs', 'places', 'carriers'.
+    A API usa snake_case: pricing_options, leg_ids, items[].url
     """
     itinerarios = dados.get("itineraries") or []
     menor_preco = float("inf")
     melhor_link = ""
-    melhor_leg_ida = {}
+    melhor_leg_ida   = {}
     melhor_leg_volta = {}
  
     legs_map = {leg["id"]: leg for leg in (dados.get("legs") or [])}
  
     for itin in itinerarios:
-        pricing = itin.get("pricingOptions") or []
+        # API retorna snake_case: pricing_options
+        pricing = itin.get("pricing_options") or itin.get("pricingOptions") or []
         if not pricing:
             continue
+ 
         preco_raw = pricing[0].get("price", {})
         if isinstance(preco_raw, dict):
             preco = float(preco_raw.get("amount", 0) or 0)
@@ -458,8 +460,18 @@ def extrair_preco(dados):
  
         if preco < menor_preco:
             menor_preco = preco
-            melhor_link = pricing[0].get("deepLink", "")
-            leg_ids = itin.get("legIds", [])
+ 
+            # Link está dentro de items[0].url
+            items = pricing[0].get("items") or []
+            if items:
+                url_path = items[0].get("url", "")
+                # Monta link completo do Skyscanner
+                melhor_link = f"https://www.skyscanner.com.br{url_path}" if url_path else ""
+            else:
+                melhor_link = pricing[0].get("deepLink", "") or pricing[0].get("deep_link", "")
+ 
+            # leg_ids também em snake_case
+            leg_ids = itin.get("leg_ids") or itin.get("legIds") or []
             if leg_ids:
                 melhor_leg_ida = legs_map.get(leg_ids[0], {})
             if len(leg_ids) > 1:
@@ -509,8 +521,8 @@ def buscar_voo(origem, destino, data_ida, data_volta, adultos, classe):
             print(f"  😔 Nenhum itinerário com preço para {destino}")
             return None
  
-        paradas = leg_ida.get("stopoversCount", 0) if leg_ida else 0
-        duracao = leg_ida.get("duration", "—") if leg_ida else "—"
+        paradas = (leg_ida.get("stopovers_count") or leg_ida.get("stopoversCount") or 0) if leg_ida else 0
+        duracao = (leg_ida.get("duration_in_minutes") or leg_ida.get("duration") or "—") if leg_ida else "—"
  
         print(f"  ✅ {destino}: R$ {preco:,.0f}")
         return {
