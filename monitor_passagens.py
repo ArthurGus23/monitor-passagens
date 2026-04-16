@@ -1,145 +1,137 @@
 """
-✈️  Monitor de Passagens PRO — Telegram + Travelpayouts
-Versão com sistema multi-usuário, comandos interativos, alertas de queda
-de preço, resumo semanal e persistência em JSON.
+✈️ Monitor de Passagens PRO — Com Botões Interativos
+FlightAPI.io + Telegram Inline Keyboards
 """
  
-import os
-import json
-import time
-import threading
-from datetime import datetime
+import os, json, time, threading, requests, schedule
+from datetime import datetime, timedelta
 from copy import deepcopy
- 
-import requests
-import schedule
  
 # ============================================================
 #  CONFIGURAÇÕES
 # ============================================================
-TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "8684505587:AAGddTQdvwKbs9hf6FBwzw-VAHJOq9XdFik")
-TRAVEL_TOKEN     = os.getenv("TRAVEL_TOKEN", "116c87c7d80210016077ea55eeb8fcd1")
-ADMIN_CHAT_ID    = os.getenv("TELEGRAM_CHAT_ID", "1680681945")
+TELEGRAM_TOKEN  = os.getenv("TELEGRAM_TOKEN", "8684505587:AAGddTQdvwKbs9hf6FBwzw-VAHJOq9XdFik")
+FLIGHTAPI_KEY   = os.getenv("FLIGHTAPI_KEY",  "69e079d51922a8f332a21d3d")
+ADMIN_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID","1680681945")
+DATA_FILE       = os.getenv("DATA_FILE",       "users.json")
+VERIFICAR_HORAS = int(os.getenv("VERIFICAR_HORAS", "12"))
+QUEDA_PERC      = 10   # % de queda para alertar
  
-ORIGEM             = os.getenv("ORIGEM", "GRU")
-PRECO_MAXIMO_PAD   = int(os.getenv("PRECO_MAXIMO_PADRAO", "20000"))
-VERIFICAR_HORAS    = int(os.getenv("VERIFICAR_HORAS", "6"))
-DATA_FILE          = os.getenv("DATA_FILE", "users.json")
-QUEDA_PERCENTUAL   = 15   # % para disparar alerta de queda
-DURACAO_VIAGEM     = 14   # dias de estadia para ida e volta (padrão)
- 
-TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
- 
-# Usuários iniciais já cadastrados
+TELEGRAM_API    = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 USUARIOS_INICIAIS = ["1680681945", "6170699300", "5938670130"]
  
 # ============================================================
-#  DESTINOS DISPONÍVEIS
+#  DESTINOS — BRASIL + MUNDO
 # ============================================================
-DESTINOS = [
-    # ⭐ FOCO PRINCIPAL
-    ("DUB", "Dublin, Irlanda 🌟 (gateway Estônia)", "🇮🇪"),
+ORIGENS_BRASIL = {
+    "GRU": "São Paulo (GRU) 🇧🇷",
+    "GIG": "Rio de Janeiro (GIG) 🇧🇷",
+    "CNF": "Belo Horizonte (CNF) 🇧🇷",
+    "SSA": "Salvador (SSA) 🇧🇷",
+    "REC": "Recife (REC) 🇧🇷",
+    "FOR": "Fortaleza (FOR) 🇧🇷",
+    "CWB": "Curitiba (CWB) 🇧🇷",
+    "POA": "Porto Alegre (POA) 🇧🇷",
+    "BSB": "Brasília (BSB) 🇧🇷",
+    "MAO": "Manaus (MAO) 🇧🇷",
+    "BEL": "Belém (BEL) 🇧🇷",
+    "FLN": "Florianópolis (FLN) 🇧🇷",
+    "VCP": "Campinas (VCP) 🇧🇷",
+    "MCZ": "Maceió (MCZ) 🇧🇷",
+    "NAT": "Natal (NAT) 🇧🇷",
+}
  
-    # 🔵 HUBS EUROPEUS COM CONEXÃO PARA TALLINN
-    ("FRA", "Frankfurt, Alemanha (hub → Tallinn)",  "🇩🇪"),
-    ("IST", "Istambul, Turquia (hub → Tallinn)",    "🇹🇷"),
-    ("ARN", "Estocolmo, Suécia (hub → Tallinn)",    "🇸🇪"),
-    ("HEL", "Helsinki, Finlândia (hub → Tallinn)",  "🇫🇮"),
-    ("RIX", "Riga, Letônia (hub → Tallinn)",        "🇱🇻"),
-    ("WAW", "Varsóvia, Polônia (hub → Tallinn)",    "🇵🇱"),
+DESTINOS_BRASIL = {
+    "GRU": "São Paulo (GRU) 🇧🇷",
+    "GIG": "Rio de Janeiro (GIG) 🇧🇷",
+    "CNF": "Belo Horizonte (CNF) 🇧🇷",
+    "SSA": "Salvador (SSA) 🇧🇷",
+    "REC": "Recife (REC) 🇧🇷",
+    "FOR": "Fortaleza (FOR) 🇧🇷",
+    "CWB": "Curitiba (CWB) 🇧🇷",
+    "POA": "Porto Alegre (POA) 🇧🇷",
+    "FLN": "Florianópolis (FLN) 🇧🇷",
+    "GRV": "Gramado/Canela* 🇧🇷",
+    "NAT": "Natal (NAT) 🇧🇷",
+    "MCZ": "Maceió (MCZ) 🇧🇷",
+    "BEL": "Belém (BEL) 🇧🇷",
+    "MAO": "Manaus (MAO) 🇧🇷",
+    "IGU": "Foz do Iguaçu (IGU) 🇧🇷",
+}
  
-    # 🌍 EUROPA
-    ("CDG", "Paris, França",                        "🇫🇷"),
-    ("LHR", "Londres, Reino Unido",                 "🇬🇧"),
-    ("MAD", "Madri, Espanha",                       "🇪🇸"),
-    ("LIS", "Lisboa, Portugal",                     "🇵🇹"),
-    ("FCO", "Roma, Itália",                         "🇮🇹"),
-    ("AMS", "Amsterdã, Holanda",                    "🇳🇱"),
-    ("VIE", "Viena, Áustria",                       "🇦🇹"),
-    ("PRG", "Praga, Rep. Tcheca",                   "🇨🇿"),
-    ("BUD", "Budapeste, Hungria",                   "🇭🇺"),
-    ("ATH", "Atenas, Grécia",                       "🇬🇷"),
-    ("CPH", "Copenhague, Dinamarca",                "🇩🇰"),
-    ("OSL", "Oslo, Noruega",                        "🇳🇴"),
-    ("OTP", "Bucareste, Romênia",                   "🇷🇴"),
-    ("BEG", "Belgrado, Sérvia",                     "🇷🇸"),
-    ("VNO", "Vilnius, Lituânia",                    "🇱🇹"),
-    ("TBS", "Tbilisi, Geórgia",                     "🇬🇪"),
-    ("SVO", "Moscou, Rússia",                       "🇷🇺"),
+DESTINOS_MUNDO = {
+    # Europa
+    "DUB": "Dublin 🇮🇪",
+    "LIS": "Lisboa 🇵🇹",
+    "MAD": "Madri 🇪🇸",
+    "LHR": "Londres 🇬🇧",
+    "CDG": "Paris 🇫🇷",
+    "FCO": "Roma 🇮🇹",
+    "AMS": "Amsterdã 🇳🇱",
+    "FRA": "Frankfurt 🇩🇪",
+    "BCN": "Barcelona 🇪🇸",
+    "VIE": "Viena 🇦🇹",
+    "PRG": "Praga 🇨🇿",
+    "ATH": "Atenas 🇬🇷",
+    "IST": "Istambul 🇹🇷",
+    "ARN": "Estocolmo 🇸🇪",
+    "HEL": "Helsinki 🇫🇮",
+    "CPH": "Copenhague 🇩🇰",
+    "WAW": "Varsóvia 🇵🇱",
+    "BUD": "Budapeste 🇭🇺",
+    # Américas
+    "MIA": "Miami 🇺🇸",
+    "JFK": "Nova York 🇺🇸",
+    "LAX": "Los Angeles 🇺🇸",
+    "ORD": "Chicago 🇺🇸",
+    "EZE": "Buenos Aires 🇦🇷",
+    "SCL": "Santiago 🇨🇱",
+    "LIM": "Lima 🇵🇪",
+    "BOG": "Bogotá 🇨🇴",
+    "MEX": "Cidade do México 🇲🇽",
+    "PTY": "Cidade do Panamá 🇵🇦",
+    "CUN": "Cancún 🇲🇽",
+    # Ásia/Oceania
+    "DXB": "Dubai 🇦🇪",
+    "NRT": "Tóquio 🇯🇵",
+    "BKK": "Bangkok 🇹🇭",
+    "SIN": "Singapura 🇸🇬",
+    "ICN": "Seul 🇰🇷",
+    "SYD": "Sydney 🇦🇺",
+    # África
+    "JNB": "Joanesburgo 🇿🇦",
+    "CMN": "Casablanca 🇲🇦",
+}
  
-    # 🌎 AMÉRICAS
-    ("EZE", "Buenos Aires, Argentina",              "🇦🇷"),
-    ("MEX", "Cidade do México, México",             "🇲🇽"),
-    ("IAD", "Washington D.C., EUA",                 "🇺🇸"),
-    ("JFK", "Nova York, EUA",                       "🇺🇸"),
-    ("LAX", "Los Angeles, EUA",                     "🇺🇸"),
-    ("YYZ", "Toronto, Canadá",                      "🇨🇦"),
-    ("SCL", "Santiago, Chile",                      "🇨🇱"),
-    ("LIM", "Lima, Peru",                           "🇵🇪"),
-    ("BOG", "Bogotá, Colômbia",                     "🇨🇴"),
-    ("MVD", "Montevidéu, Uruguai",                  "🇺🇾"),
-    ("PTY", "Cidade do Panamá, Panamá",             "🇵🇦"),
-    ("HAV", "Havana, Cuba",                         "🇨🇺"),
+TODOS_DESTINOS = {**DESTINOS_BRASIL, **DESTINOS_MUNDO}
  
-    # 🌏 ÁSIA
-    ("NRT", "Tóquio, Japão",                        "🇯🇵"),
-    ("PEK", "Pequim, China",                        "🇨🇳"),
-    ("ICN", "Seul, Coreia do Sul",                  "🇰🇷"),
-    ("DEL", "Nova Delhi, Índia",                    "🇮🇳"),
-    ("BKK", "Bangkok, Tailândia",                   "🇹🇭"),
-    ("SIN", "Singapura",                            "🇸🇬"),
-    ("KUL", "Kuala Lumpur, Malásia",                "🇲🇾"),
-    ("CGK", "Jacarta, Indonésia",                   "🇮🇩"),
-    ("MNL", "Manila, Filipinas",                    "🇵🇭"),
-    ("HAN", "Hanói, Vietnã",                        "🇻🇳"),
-    ("DXB", "Dubai, Emirados Árabes",               "🇦🇪"),
-    ("TLV", "Tel Aviv, Israel",                     "🇮🇱"),
- 
-    # 🌍 ÁFRICA
-    ("CAI", "Cairo, Egito",                         "🇪🇬"),
-    ("NBO", "Nairóbi, Quênia",                      "🇰🇪"),
-    ("JNB", "Joanesburgo, África do Sul",           "🇿🇦"),
-    ("LOS", "Lagos, Nigéria",                       "🇳🇬"),
-    ("CMN", "Casablanca, Marrocos",                 "🇲🇦"),
-    ("ADD", "Adis Abeba, Etiópia",                  "🇪🇹"),
-    ("LAD", "Luanda, Angola",                       "🇦🇴"),
-    ("MPM", "Maputo, Moçambique",                   "🇲🇿"),
- 
-    # 🌏 OCEANIA
-    ("SYD", "Sydney, Austrália",                    "🇦🇺"),
-    ("AKL", "Auckland, Nova Zelândia",              "🇳🇿"),
-]
- 
-DESTINOS_MAP    = {cod: (cod, nome, emoji) for cod, nome, emoji in DESTINOS}
-DESTINOS_PADRAO = ["DUB", "FRA", "IST", "ARN", "HEL", "RIX", "WAW"]
+# Gramado não tem aeroporto — mais próximo é POA ou CXJ
+GRAMADO_NOTE = "* Gramado/Canela: voe para Porto Alegre (POA) e pegue ônibus (~3h)"
  
 # ============================================================
 #  PERSISTÊNCIA
 # ============================================================
 data_lock = threading.RLock()
-state = {"users": {}, "ofertas_semana": []}
+state = {"users": {}, "historico_semana": []}
  
  
-def carregar_dados():
+def carregar():
     global state
     if os.path.exists(DATA_FILE):
         try:
             with open(DATA_FILE, "r", encoding="utf-8") as f:
                 state = json.load(f)
                 state.setdefault("users", {})
-                state.setdefault("ofertas_semana", [])
-            print(f"[{datetime.now()}] 📂 Dados carregados: {len(state['users'])} usuário(s).")
+                state.setdefault("historico_semana", [])
         except Exception as e:
-            print(f"[{datetime.now()}] ⚠️ Erro ao carregar {DATA_FILE}: {e}")
- 
+            print(f"⚠️ Erro ao carregar: {e}")
     for cid in USUARIOS_INICIAIS:
         if cid not in state["users"]:
             state["users"][cid] = novo_usuario(cid)
-            print(f"[{datetime.now()}] 👤 Usuário inicial cadastrado: {cid}")
-    salvar_dados()
+    salvar()
  
  
-def salvar_dados():
+def salvar():
     with data_lock:
         try:
             tmp = DATA_FILE + ".tmp"
@@ -147,20 +139,25 @@ def salvar_dados():
                 json.dump(state, f, ensure_ascii=False, indent=2)
             os.replace(tmp, DATA_FILE)
         except Exception as e:
-            print(f"[{datetime.now()}] ⚠️ Erro ao salvar: {e}")
+            print(f"⚠️ Erro ao salvar: {e}")
  
  
 def novo_usuario(chat_id, nome=""):
     return {
         "chat_id":      str(chat_id),
         "nome":         nome,
-        "preco_max":    PRECO_MAXIMO_PAD,
-        "destinos":     list(DESTINOS_PADRAO),
+        "origem":       "GRU",
+        "destinos":     ["DUB", "LIS", "MIA", "EZE"],
         "favorito":     "DUB",
-        "meses":        [],
-        "duracao":      DURACAO_VIAGEM,   # dias de estadia ida e volta
+        "preco_max":    5000,
+        "data_ida":     "",
+        "data_volta":   "",
+        "duracao":      14,
+        "classe":       "Economy",
+        "adultos":      1,
         "pausado":      False,
         "ultimo_preco": {},
+        "estado":       None,   # controla fluxo de botões
         "criado_em":    datetime.now().isoformat(timespec="seconds"),
     }
  
@@ -170,568 +167,879 @@ def get_user(chat_id, nome=""):
     with data_lock:
         if cid not in state["users"]:
             state["users"][cid] = novo_usuario(cid, nome)
-            salvar_dados()
+            salvar()
         return state["users"][cid]
  
  
 # ============================================================
-#  TELEGRAM
+#  TELEGRAM — ENVIO
 # ============================================================
  
-def enviar_telegram(chat_id, mensagem, disable_preview=True):
-    url     = f"{TELEGRAM_API}/sendMessage"
+def send(chat_id, texto, teclado=None, editar_msg_id=None):
+    """Envia ou edita mensagem com teclado inline opcional."""
+    headers = {"Content-Type": "application/json"}
     payload = {
-        "chat_id":                  str(chat_id),
-        "text":                     mensagem,
-        "parse_mode":               "HTML",
-        "disable_web_page_preview": disable_preview,
+        "chat_id":    str(chat_id),
+        "text":       texto,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
     }
+    if teclado:
+        payload["reply_markup"] = {"inline_keyboard": teclado}
+ 
+    if editar_msg_id:
+        url = f"{TELEGRAM_API}/editMessageText"
+        payload["message_id"] = editar_msg_id
+    else:
+        url = f"{TELEGRAM_API}/sendMessage"
+ 
     try:
         r = requests.post(url, json=payload, timeout=15)
+        data = r.json()
         if r.status_code == 200:
-            return True
-        print(f"[{datetime.now()}] ❌ Telegram {chat_id}: {r.text}")
+            return data.get("result", {}).get("message_id")
+        print(f"❌ Telegram {chat_id}: {r.text[:200]}")
     except Exception as e:
-        print(f"[{datetime.now()}] ❌ Conexão {chat_id}: {e}")
-    return False
+        print(f"❌ send error: {e}")
+    return None
  
  
-# ============================================================
-#  BUSCA DE OFERTAS
-# ============================================================
- 
-def montar_link_kayak(origem, destino, data_ida, data_volta):
-    ida   = data_ida   if data_ida   and data_ida   != "—" else ""
-    volta = data_volta if data_volta and data_volta != "—" else ""
-    if ida and volta:
-        return f"https://www.kayak.com.br/flights/{origem}-{destino}/{ida}/{volta}"
-    if ida:
-        return f"https://www.kayak.com.br/flights/{origem}-{destino}/{ida}"
-    return f"https://www.kayak.com.br/flights/{origem}-{destino}"
- 
- 
-def buscar_ofertas_destino(codigo_iata, duracao=DURACAO_VIAGEM):
-    """
-    Busca ida e volta usando trip_duration.
-    A API retorna preços em cache — podem diferir do valor real no site.
-    """
+def answer_callback(callback_id, texto=""):
     try:
-        url    = "https://api.travelpayouts.com/v2/prices/month-matrix"
-        params = {
-            "origin":             ORIGEM,
-            "destination":        codigo_iata,
-            "currency":           "brl",
-            "show_to_affiliates": "true",
-            "token":              TRAVEL_TOKEN,
-            "trip_duration":      duracao,   # ← ida e volta com N dias de estadia
-        }
-        r = requests.get(url, params=params, timeout=20)
-        if r.status_code != 200:
-            print(f"  [{codigo_iata}] HTTP {r.status_code}")
-            return []
-        lista   = r.json().get("data") or []
-        ofertas = []
-        for item in lista:
-            preco = item.get("value")
-            if preco is None:
-                continue
-            data_ida   = item.get("depart_date") or ""
-            data_volta = item.get("return_date") or ""
-            ofertas.append({
-                "iata":       codigo_iata,
-                "preco":      float(preco),
-                "data_ida":   data_ida   or "—",
-                "data_volta": data_volta or "—",
-                "cia":        item.get("gate") or "—",
-                "link":       montar_link_kayak(ORIGEM, codigo_iata, data_ida, data_volta),
-            })
-        ofertas.sort(key=lambda o: o["preco"])
-        return ofertas
-    except Exception as e:
-        print(f"  ⚠️ Erro buscando {codigo_iata}: {e}")
-        return []
- 
- 
-def filtrar_por_meses(ofertas, meses):
-    if not meses:
-        return ofertas
-    out = []
-    for o in ofertas:
-        try:
-            mes = int(o["data_ida"].split("-")[1])
-            if mes in meses:
-                out.append(o)
-        except Exception:
-            continue
-    return out
- 
- 
-def melhor_oferta_para_usuario(usuario, codigo_iata, cache):
-    duracao  = usuario.get("duracao", DURACAO_VIAGEM)
-    cache_key = f"{codigo_iata}_{duracao}"
-    if cache_key not in cache:
-        cache[cache_key] = buscar_ofertas_destino(codigo_iata, duracao)
-        time.sleep(0.4)
-    ofertas = filtrar_por_meses(cache[cache_key], usuario.get("meses") or [])
-    ofertas = [o for o in ofertas if o["preco"] <= usuario["preco_max"]]
-    return ofertas[0] if ofertas else None
+        requests.post(f"{TELEGRAM_API}/answerCallbackQuery",
+                      json={"callback_query_id": callback_id, "text": texto},
+                      timeout=10)
+    except:
+        pass
  
  
 # ============================================================
-#  FORMATAÇÃO
+#  TECLADOS (MENUS)
 # ============================================================
  
-AVISO_PRECO = "⚠️ <i>Preço estimado (cache). Valor real pode variar — confirme no Kayak.</i>"
+def teclado_menu_principal(usuario):
+    origem_nome = ORIGENS_BRASIL.get(usuario["origem"], usuario["origem"])
+    destinos_str = f"{len(usuario['destinos'])} destino(s)"
+    data_ida = usuario.get("data_ida") or "Não definida"
+    data_volta = usuario.get("data_volta") or "Não definida"
+    preco = f"R$ {usuario['preco_max']:,}"
+    status = "⏸ Pausado" if usuario.get("pausado") else "▶️ Ativo"
  
-def fmt_oferta(o, prefix=""):
-    cod = o["iata"]
-    _, nome, emoji = DESTINOS_MAP.get(cod, (cod, cod, "✈️"))
- 
-    # Monta linha de datas
-    if o.get("data_volta") and o["data_volta"] != "—":
-        datas = f"✈️ Ida: {o['data_ida']}  🔄 Volta: {o['data_volta']}"
-    else:
-        datas = f"✈️ Ida: {o['data_ida']}"
- 
-    return (
-        f"{prefix}{emoji} <b>{nome}</b>\n"
-        f"   💵 ~R$ {o['preco']:,.0f} (ida e volta) | 🏢 {o['cia']}\n"
-        f"   {datas}\n"
-        f"   🔗 <a href='{o['link']}'>Confirmar preço no Kayak</a>\n"
+    texto = (
+        f"✈️ <b>Monitor de Passagens PRO</b>\n\n"
+        f"👤 Olá, <b>{usuario.get('nome') or 'Viajante'}</b>!\n\n"
+        f"⚙️ <b>Suas configurações:</b>\n"
+        f"🛫 Origem: <b>{origem_nome}</b>\n"
+        f"🌍 Destinos: <b>{destinos_str}</b>\n"
+        f"📅 Ida: <b>{data_ida}</b>\n"
+        f"📅 Volta: <b>{data_volta}</b>\n"
+        f"💰 Preço máx: <b>{preco}</b>\n"
+        f"💺 Classe: <b>{usuario.get('classe','Economy')}</b>\n"
+        f"👥 Adultos: <b>{usuario.get('adultos',1)}</b>\n"
+        f"🔔 Status: <b>{status}</b>\n\n"
+        f"O que deseja fazer?"
     )
  
+    botoes = [
+        [
+            {"text": "🔍 Buscar Agora",         "callback_data": "buscar"},
+            {"text": "🌍 Meus Destinos",         "callback_data": "menu_destinos"},
+        ],
+        [
+            {"text": "🛫 Mudar Origem",          "callback_data": "menu_origem"},
+            {"text": "📅 Definir Datas",         "callback_data": "menu_datas"},
+        ],
+        [
+            {"text": "💰 Mudar Preço Máx",       "callback_data": "menu_preco"},
+            {"text": "💺 Classe do Voo",         "callback_data": "menu_classe"},
+        ],
+        [
+            {"text": "👥 Nº de Passageiros",     "callback_data": "menu_adultos"},
+            {"text": "⭐ Destino Favorito",       "callback_data": "menu_favorito"},
+        ],
+        [
+            {"text": "⏸ Pausar Alertas" if not usuario.get("pausado") else "▶️ Retomar Alertas",
+             "callback_data": "toggle_pausa"},
+            {"text": "📊 Histórico Semanal",     "callback_data": "resumo"},
+        ],
+    ]
+    return texto, botoes
  
-def montar_mensagem_alertas(usuario, ofertas, quedas):
-    favorito   = usuario.get("favorito")
-    fav_oferta = next((o for o in ofertas if o["iata"] == favorito), None)
-    hubs       = [o for o in ofertas if "hub" in DESTINOS_MAP.get(o["iata"], (None,"",""))[1] and o["iata"] != favorito]
-    outras     = [o for o in ofertas if "hub" not in DESTINOS_MAP.get(o["iata"], (None,"",""))[1] and o["iata"] != favorito]
-    duracao    = usuario.get("duracao", DURACAO_VIAGEM)
+ 
+def teclado_origens():
+    botoes = []
+    items = list(ORIGENS_BRASIL.items())
+    for i in range(0, len(items), 2):
+        linha = []
+        for cod, nome in items[i:i+2]:
+            linha.append({"text": nome, "callback_data": f"set_origem_{cod}"})
+        botoes.append(linha)
+    botoes.append([{"text": "🔙 Voltar", "callback_data": "menu_principal"}])
+    return "🛫 <b>Selecione sua cidade de origem:</b>", botoes
+ 
+ 
+def teclado_destinos_menu(usuario):
+    botoes = [
+        [
+            {"text": "🇧🇷 Adicionar Brasil",     "callback_data": "add_dest_brasil"},
+            {"text": "🌍 Adicionar Internacional","callback_data": "add_dest_mundo"},
+        ],
+        [{"text": "❌ Remover Destino",          "callback_data": "rem_dest_menu"}],
+        [{"text": "🔙 Voltar",                   "callback_data": "menu_principal"}],
+    ]
+    ativos = "\n".join([f"  • {TODOS_DESTINOS.get(d, d)}" for d in usuario["destinos"]]) or "  Nenhum"
+    texto = f"🌍 <b>Seus destinos ativos:</b>\n{ativos}\n\nO que deseja fazer?"
+    return texto, botoes
+ 
+ 
+def teclado_lista_destinos(categoria, usuario, pagina=0):
+    if categoria == "brasil":
+        fonte = DESTINOS_BRASIL
+        titulo = "🇧🇷 <b>Destinos no Brasil:</b>\n(✅ = já ativo)"
+    else:
+        fonte = DESTINOS_MUNDO
+        titulo = "🌍 <b>Destinos Internacionais:</b>\n(✅ = já ativo)"
+ 
+    items = list(fonte.items())
+    por_pagina = 8
+    inicio = pagina * por_pagina
+    fim = inicio + por_pagina
+    pagina_items = items[inicio:fim]
+ 
+    botoes = []
+    for i in range(0, len(pagina_items), 2):
+        linha = []
+        for cod, nome in pagina_items[i:i+2]:
+            marca = "✅ " if cod in usuario["destinos"] else ""
+            linha.append({"text": f"{marca}{nome}", "callback_data": f"toggle_dest_{cod}"})
+        botoes.append(linha)
+ 
+    nav = []
+    if pagina > 0:
+        nav.append({"text": "◀️ Anterior", "callback_data": f"dest_pag_{categoria}_{pagina-1}"})
+    if fim < len(items):
+        nav.append({"text": "Próxima ▶️", "callback_data": f"dest_pag_{categoria}_{pagina+1}"})
+    if nav:
+        botoes.append(nav)
+ 
+    botoes.append([{"text": "🔙 Voltar", "callback_data": "menu_destinos"}])
+    return titulo, botoes
+ 
+ 
+def teclado_datas(usuario):
+    hoje = datetime.today()
+    opcoes_ida = []
+    for semanas in [4, 6, 8, 10, 12, 16, 20, 24]:
+        data = hoje + timedelta(weeks=semanas)
+        label = data.strftime("%d/%m/%Y")
+        valor = data.strftime("%Y-%m-%d")
+        opcoes_ida.append((label, valor))
+ 
+    botoes = []
+    for i in range(0, len(opcoes_ida), 3):
+        linha = []
+        for label, valor in opcoes_ida[i:i+3]:
+            linha.append({"text": label, "callback_data": f"set_ida_{valor}"})
+        botoes.append(linha)
+ 
+    botoes.append([{"text": "📝 Digitar data manualmente", "callback_data": "digitar_data_ida"}])
+    botoes.append([{"text": "🔙 Voltar", "callback_data": "menu_principal"}])
+ 
+    data_atual = usuario.get("data_ida") or "não definida"
+    texto = (
+        f"📅 <b>Selecione a data de ida:</b>\n"
+        f"Data atual: <b>{data_atual}</b>\n\n"
+        f"Escolha uma das opções ou digite manualmente:"
+    )
+    return texto, botoes
+ 
+ 
+def teclado_volta(data_ida):
+    ida = datetime.strptime(data_ida, "%Y-%m-%d")
+    opcoes = []
+    for dias in [7, 10, 14, 21, 30]:
+        data = ida + timedelta(days=dias)
+        label = f"{dias} dias ({data.strftime('%d/%m/%Y')})"
+        valor = data.strftime("%Y-%m-%d")
+        opcoes.append((label, valor))
+ 
+    botoes = []
+    for label, valor in opcoes:
+        botoes.append([{"text": label, "callback_data": f"set_volta_{valor}"}])
+    botoes.append([{"text": "📝 Digitar data manualmente", "callback_data": "digitar_data_volta"}])
+    botoes.append([{"text": "🚫 Só ida (sem volta)", "callback_data": "set_volta_none"}])
+    botoes.append([{"text": "🔙 Voltar", "callback_data": "menu_datas"}])
+ 
+    texto = f"📅 <b>Data de ida:</b> {ida.strftime('%d/%m/%Y')}\n\n<b>Selecione a duração da viagem:</b>"
+    return texto, botoes
+ 
+ 
+def teclado_preco():
+    opcoes = [
+        ("R$ 1.000",  1000), ("R$ 2.000",  2000),
+        ("R$ 3.000",  3000), ("R$ 4.000",  4000),
+        ("R$ 5.000",  5000), ("R$ 7.000",  7000),
+        ("R$ 10.000", 10000),("R$ 15.000", 15000),
+        ("R$ 20.000", 20000),("R$ 30.000", 30000),
+    ]
+    botoes = []
+    for i in range(0, len(opcoes), 3):
+        linha = []
+        for label, val in opcoes[i:i+3]:
+            linha.append({"text": label, "callback_data": f"set_preco_{val}"})
+        botoes.append(linha)
+    botoes.append([{"text": "📝 Digitar valor", "callback_data": "digitar_preco"}])
+    botoes.append([{"text": "🔙 Voltar", "callback_data": "menu_principal"}])
+    return "💰 <b>Selecione seu preço máximo por pessoa (ida e volta):</b>", botoes
+ 
+ 
+def teclado_classe():
+    botoes = [
+        [
+            {"text": "💺 Econômica",        "callback_data": "set_classe_Economy"},
+            {"text": "🥈 Econômica Premium","callback_data": "set_classe_Premium_Economy"},
+        ],
+        [
+            {"text": "🥇 Executiva",        "callback_data": "set_classe_Business"},
+            {"text": "👑 Primeira Classe",  "callback_data": "set_classe_First"},
+        ],
+        [{"text": "🔙 Voltar",              "callback_data": "menu_principal"}],
+    ]
+    return "💺 <b>Selecione a classe do voo:</b>", botoes
+ 
+ 
+def teclado_adultos():
+    botoes = [
+        [
+            {"text": "👤 1 adulto",  "callback_data": "set_adultos_1"},
+            {"text": "👥 2 adultos", "callback_data": "set_adultos_2"},
+            {"text": "👨‍👩‍👧 3 adultos", "callback_data": "set_adultos_3"},
+        ],
+        [
+            {"text": "👨‍👩‍👧‍👦 4 adultos","callback_data": "set_adultos_4"},
+            {"text": "🏢 5 adultos", "callback_data": "set_adultos_5"},
+            {"text": "🏢 6 adultos", "callback_data": "set_adultos_6"},
+        ],
+        [{"text": "🔙 Voltar",      "callback_data": "menu_principal"}],
+    ]
+    return "👥 <b>Quantos adultos vão viajar?</b>", botoes
+ 
+ 
+def teclado_favorito(usuario):
+    botoes = []
+    items = [(cod, TODOS_DESTINOS.get(cod, cod)) for cod in usuario["destinos"]]
+    for i in range(0, len(items), 2):
+        linha = []
+        for cod, nome in items[i:i+2]:
+            marca = "⭐ " if cod == usuario.get("favorito") else ""
+            linha.append({"text": f"{marca}{nome}", "callback_data": f"set_fav_{cod}"})
+        botoes.append(linha)
+    botoes.append([{"text": "🔙 Voltar", "callback_data": "menu_principal"}])
+    return "⭐ <b>Selecione seu destino favorito (aparece em destaque):</b>", botoes
+ 
+ 
+# ============================================================
+#  FLIGHTAPI — BUSCA REAL
+# ============================================================
+ 
+def buscar_voo(origem, destino, data_ida, data_volta, adultos, classe, moeda="BRL"):
+    """Busca ida e volta na FlightAPI.io"""
+    try:
+        if data_volta:
+            url = (
+                f"https://api.flightapi.io/roundtrip/{FLIGHTAPI_KEY}"
+                f"/{origem}/{destino}/{data_ida}/{data_volta}"
+                f"/{adultos}/0/0/{classe}/{moeda}"
+            )
+        else:
+            url = (
+                f"https://api.flightapi.io/onewaytrip/{FLIGHTAPI_KEY}"
+                f"/{origem}/{destino}/{data_ida}"
+                f"/{adultos}/0/0/{classe}/{moeda}"
+            )
+ 
+        print(f"  🔍 {origem}→{destino} {data_ida}")
+        r = requests.get(url, timeout=30)
+ 
+        if r.status_code == 410:
+            print(f"  ⚠️ Sem voos para {destino} nessa data")
+            return None
+        if r.status_code != 200:
+            print(f"  ❌ HTTP {r.status_code} para {destino}")
+            return None
+ 
+        dados = r.json()
+        itinerarios = dados.get("itineraries", [])
+        if not itinerarios:
+            return None
+ 
+        # Pega o mais barato
+        melhor = None
+        menor_preco = float("inf")
+ 
+        for itin in itinerarios[:10]:
+            pricing = itin.get("pricingOptions", [])
+            if not pricing:
+                continue
+            preco = pricing[0].get("price", {}).get("amount", 0)
+            if preco and float(preco) < menor_preco:
+                menor_preco = float(preco)
+                link = pricing[0].get("deepLink", "")
+                legs = dados.get("legs", [])
+ 
+                ida_info = {}
+                volta_info = {}
+                if legs:
+                    leg_ids = itin.get("legIds", [])
+                    for leg in legs:
+                        if leg.get("id") == (leg_ids[0] if leg_ids else ""):
+                            ida_info = leg
+                        elif len(leg_ids) > 1 and leg.get("id") == leg_ids[1]:
+                            volta_info = leg
+ 
+                melhor = {
+                    "origem":    origem,
+                    "destino":   destino,
+                    "preco":     menor_preco,
+                    "moeda":     moeda,
+                    "data_ida":  data_ida,
+                    "data_volta": data_volta or "—",
+                    "duracao_ida": ida_info.get("duration", "—"),
+                    "paradas_ida": ida_info.get("stopoversCount", 0),
+                    "link":      link,
+                    "classe":    classe,
+                    "adultos":   adultos,
+                }
+ 
+        return melhor
+ 
+    except Exception as e:
+        print(f"  ⚠️ Erro buscando {destino}: {e}")
+        return None
+ 
+ 
+def fmt_resultado(oferta):
+    destino_nome = TODOS_DESTINOS.get(oferta["destino"], oferta["destino"])
+    origem_nome  = ORIGENS_BRASIL.get(oferta["origem"], oferta["origem"])
+    paradas = "Direto ✈️" if oferta["paradas_ida"] == 0 else f"{oferta['paradas_ida']} parada(s)"
  
     msg = (
-        f"✈️ <b>ALERTAS DE PASSAGENS</b>\n"
+        f"{'🌟 ' if oferta.get('favorito') else ''}"
+        f"{destino_nome}\n"
+        f"   💵 <b>R$ {oferta['preco']:,.0f}</b> por pessoa\n"
+        f"   🛫 {origem_nome}\n"
+        f"   📅 Ida: {oferta['data_ida']}"
+    )
+    if oferta["data_volta"] != "—":
+        msg += f" | Volta: {oferta['data_volta']}"
+    msg += f"\n   ✈️ {paradas} | 💺 {oferta['classe']}\n"
+    if oferta.get("link"):
+        msg += f"   🔗 <a href='{oferta['link']}'>Reservar agora</a>\n"
+    return msg
+ 
+ 
+# ============================================================
+#  LÓGICA DE BUSCA PARA USUÁRIO
+# ============================================================
+ 
+def buscar_para_usuario(usuario):
+    if not usuario.get("data_ida"):
+        return None, "❌ Defina uma data de ida primeiro! Use o menu abaixo."
+ 
+    origem   = usuario.get("origem", "GRU")
+    data_ida = usuario["data_ida"]
+    data_volta = usuario.get("data_volta") or ""
+    adultos  = usuario.get("adultos", 1)
+    classe   = usuario.get("classe", "Economy")
+    preco_max = usuario.get("preco_max", 5000)
+    favorito = usuario.get("favorito")
+ 
+    ofertas  = []
+    quedas   = []
+ 
+    for destino in usuario.get("destinos", []):
+        if destino == "GRV":
+            destino_real = "POA"  # Gramado → Porto Alegre
+        else:
+            destino_real = destino
+ 
+        oferta = buscar_voo(origem, destino_real, data_ida, data_volta, adultos, classe)
+        if not oferta:
+            continue
+ 
+        oferta["destino_original"] = destino
+        if destino == "GRV":
+            oferta["destino"] = "GRV"
+ 
+        if oferta["preco"] <= preco_max:
+            if destino == favorito:
+                oferta["favorito"] = True
+            ofertas.append(oferta)
+ 
+            anterior = usuario.get("ultimo_preco", {}).get(destino)
+            if anterior and anterior > 0:
+                queda = (anterior - oferta["preco"]) / anterior * 100
+                if queda >= QUEDA_PERC:
+                    quedas.append({"oferta": oferta, "anterior": anterior, "perc": queda})
+ 
+        time.sleep(1)  # respeita rate limit
+ 
+    # Atualiza histórico de preços
+    with data_lock:
+        usuario["ultimo_preco"] = {o["destino_original"]: o["preco"] for o in ofertas}
+        salvar()
+ 
+    return ofertas, quedas
+ 
+ 
+def montar_msg_resultados(usuario, ofertas, quedas):
+    if not ofertas:
+        return (
+            f"😔 <b>Nenhuma oferta encontrada</b>\n\n"
+            f"Não encontrei passagens abaixo de R$ {usuario['preco_max']:,} "
+            f"para as datas selecionadas.\n\n"
+            f"💡 Dicas:\n"
+            f"• Tente aumentar o preço máximo\n"
+            f"• Mude as datas de viagem\n"
+            f"• Adicione mais destinos\n"
+        )
+ 
+    ofertas.sort(key=lambda x: x["preco"])
+    fav = next((o for o in ofertas if o.get("favorito")), None)
+    outras = [o for o in ofertas if not o.get("favorito")]
+ 
+    msg = (
+        f"✈️ <b>RESULTADOS DA BUSCA</b>\n"
         f"🗓 {datetime.now().strftime('%d/%m/%Y às %H:%M')}\n"
-        f"💰 Limite: ~R$ {usuario['preco_max']:,} | {len(ofertas)} oferta(s) | {duracao} dias\n"
-        f"{AVISO_PRECO}\n"
+        f"💰 Abaixo de R$ {usuario['preco_max']:,} | {len(ofertas)} oferta(s)\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
     )
  
     if quedas:
         msg += "🔥 <b>QUEDA DE PREÇO!</b>\n"
         for q in quedas:
-            cod = q["oferta"]["iata"]
-            _, nome, emoji = DESTINOS_MAP.get(cod, (cod, cod, "✈️"))
-            msg += (
-                f"{emoji} <b>{nome}</b>\n"
-                f"   📉 ~R$ {q['anterior']:,.0f} → <b>~R$ {q['oferta']['preco']:,.0f}</b> "
-                f"(-{q['percentual']:.0f}%)\n"
-                f"   🔗 <a href='{q['oferta']['link']}'>Confirmar no Kayak</a>\n"
-            )
+            nome = TODOS_DESTINOS.get(q["oferta"]["destino"], q["oferta"]["destino"])
+            msg += f"📉 {nome}: R$ {q['anterior']:,.0f} → <b>R$ {q['oferta']['preco']:,.0f}</b> (-{q['perc']:.0f}%)\n"
         msg += "\n━━━━━━━━━━━━━━━━━━━━\n\n"
  
-    if fav_oferta:
-        _, nome, emoji = DESTINOS_MAP.get(favorito, (favorito, favorito, "⭐"))
-        msg += f"⭐ <b>SEU FAVORITO</b>\n"
-        msg += fmt_oferta(fav_oferta)
-        if favorito == "DUB":
-            msg += "   💡 De Dublin → Tallinn por ~€50-150\n"
-        msg += "\n━━━━━━━━━━━━━━━━━━━━\n\n"
- 
-    if hubs:
-        msg += "🔵 <b>HUBS COM VOO PARA TALLINN</b>\n\n"
-        for o in hubs:
-            msg += fmt_oferta(o) + "\n"
+    if fav:
+        msg += "⭐ <b>SEU FAVORITO</b>\n"
+        msg += fmt_resultado(fav) + "\n"
+        if fav.get("destino") == "GRV":
+            msg += f"   💡 {GRAMADO_NOTE}\n\n"
         msg += "━━━━━━━━━━━━━━━━━━━━\n\n"
  
     if outras:
-        msg += "🌍 <b>OUTRAS OFERTAS</b>\n\n"
-        for o in outras[:10]:
-            msg += fmt_oferta(o) + "\n"
-        if len(outras) > 10:
-            msg += f"<i>+{len(outras)-10} outras ofertas encontradas.</i>\n\n"
+        msg += f"🌍 <b>OUTRAS OFERTAS ({len(outras)})</b>\n\n"
+        for o in outras[:8]:
+            msg += fmt_resultado(o) + "\n"
+            if o.get("destino") == "GRV":
+                msg += f"   💡 {GRAMADO_NOTE}\n"
+        if len(outras) > 8:
+            msg += f"<i>+{len(outras)-8} outras ofertas encontradas.</i>\n"
  
-    msg += "━━━━━━━━━━━━━━━━━━━━\n🤖 Monitor automático de passagens"
+    msg += "━━━━━━━━━━━━━━━━━━━━\n🤖 Monitor Passagens PRO"
     return msg
  
  
 # ============================================================
-#  VERIFICAÇÃO PRINCIPAL
+#  PROCESSAMENTO DE CALLBACKS (BOTÕES)
 # ============================================================
  
-def verificar_para_usuario(usuario, cache):
-    if usuario.get("pausado"):
-        return None
-    ofertas      = []
-    quedas       = []
-    novos_precos = {}
+def processar_callback(update):
+    cb   = update.get("callback_query", {})
+    if not cb:
+        return
+    chat_id     = cb.get("message", {}).get("chat", {}).get("id")
+    msg_id      = cb.get("message", {}).get("message_id")
+    cb_id       = cb.get("id")
+    data        = cb.get("data", "")
+    nome        = cb.get("from", {}).get("first_name", "")
  
-    for cod in usuario["destinos"]:
-        if cod not in DESTINOS_MAP:
-            continue
-        oferta = melhor_oferta_para_usuario(usuario, cod, cache)
-        if not oferta:
-            continue
-        ofertas.append(oferta)
-        novos_precos[cod] = oferta["preco"]
- 
-        anterior = usuario.get("ultimo_preco", {}).get(cod)
-        if anterior and anterior > 0:
-            queda = (anterior - oferta["preco"]) / anterior * 100
-            if queda >= QUEDA_PERCENTUAL:
-                quedas.append({"oferta": oferta, "anterior": anterior, "percentual": queda})
- 
-    with data_lock:
-        usuario["ultimo_preco"] = novos_precos
-        salvar_dados()
- 
-    if not ofertas:
-        return None
-    ofertas.sort(key=lambda o: o["preco"])
-    return {"ofertas": ofertas, "quedas": quedas}
- 
- 
-def verificar_todos():
-    print(f"\n[{datetime.now()}] 🔍 Iniciando verificação global...")
-    with data_lock:
-        usuarios = [deepcopy(u) for u in state["users"].values() if not u.get("pausado")]
- 
-    if not usuarios:
-        print(f"[{datetime.now()}] Nenhum usuário ativo.")
+    if not chat_id:
         return
  
-    cache = {}
+    answer_callback(cb_id)
+    usuario = get_user(chat_id, nome)
+ 
+    # ── MENU PRINCIPAL ──────────────────────────────────────
+    if data == "menu_principal":
+        texto, botoes = teclado_menu_principal(usuario)
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    # ── ORIGEM ──────────────────────────────────────────────
+    elif data == "menu_origem":
+        texto, botoes = teclado_origens()
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    elif data.startswith("set_origem_"):
+        cod = data.replace("set_origem_", "")
+        usuario["origem"] = cod
+        salvar()
+        nome_origem = ORIGENS_BRASIL.get(cod, cod)
+        answer_callback(cb_id, f"✅ Origem: {nome_origem}")
+        texto, botoes = teclado_menu_principal(usuario)
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    # ── DESTINOS ────────────────────────────────────────────
+    elif data == "menu_destinos":
+        texto, botoes = teclado_destinos_menu(usuario)
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    elif data == "add_dest_brasil":
+        texto, botoes = teclado_lista_destinos("brasil", usuario)
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    elif data == "add_dest_mundo":
+        texto, botoes = teclado_lista_destinos("mundo", usuario)
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    elif data.startswith("dest_pag_"):
+        partes = data.split("_")
+        categoria = partes[2]
+        pagina = int(partes[3])
+        texto, botoes = teclado_lista_destinos(categoria, usuario, pagina)
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    elif data.startswith("toggle_dest_"):
+        cod = data.replace("toggle_dest_", "")
+        if cod in usuario["destinos"]:
+            usuario["destinos"].remove(cod)
+            answer_callback(cb_id, f"❌ {TODOS_DESTINOS.get(cod, cod)} removido")
+        else:
+            usuario["destinos"].append(cod)
+            answer_callback(cb_id, f"✅ {TODOS_DESTINOS.get(cod, cod)} adicionado")
+        salvar()
+        # Atualiza a lista
+        if cod in DESTINOS_BRASIL:
+            texto, botoes = teclado_lista_destinos("brasil", usuario)
+        else:
+            texto, botoes = teclado_lista_destinos("mundo", usuario)
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    elif data == "rem_dest_menu":
+        botoes = []
+        for cod in usuario["destinos"]:
+            nome_dest = TODOS_DESTINOS.get(cod, cod)
+            botoes.append([{"text": f"❌ {nome_dest}", "callback_data": f"toggle_dest_{cod}"}])
+        botoes.append([{"text": "🔙 Voltar", "callback_data": "menu_destinos"}])
+        send(chat_id, "❌ <b>Toque para remover um destino:</b>", botoes, editar_msg_id=msg_id)
+ 
+    # ── DATAS ───────────────────────────────────────────────
+    elif data == "menu_datas":
+        texto, botoes = teclado_datas(usuario)
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    elif data.startswith("set_ida_"):
+        data_ida = data.replace("set_ida_", "")
+        usuario["data_ida"] = data_ida
+        usuario["data_volta"] = ""
+        salvar()
+        texto, botoes = teclado_volta(data_ida)
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    elif data == "digitar_data_ida":
+        usuario["estado"] = "aguardando_data_ida"
+        salvar()
+        send(chat_id,
+             "📅 <b>Digite a data de ida no formato DD/MM/AAAA:</b>\n"
+             "Exemplo: <code>15/07/2026</code>")
+ 
+    elif data == "digitar_data_volta":
+        usuario["estado"] = "aguardando_data_volta"
+        salvar()
+        send(chat_id,
+             "📅 <b>Digite a data de volta no formato DD/MM/AAAA:</b>\n"
+             "Exemplo: <code>29/07/2026</code>")
+ 
+    elif data.startswith("set_volta_"):
+        val = data.replace("set_volta_", "")
+        usuario["data_volta"] = "" if val == "none" else val
+        salvar()
+        answer_callback(cb_id, "✅ Datas configuradas!")
+        texto, botoes = teclado_menu_principal(usuario)
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    # ── PREÇO ───────────────────────────────────────────────
+    elif data == "menu_preco":
+        texto, botoes = teclado_preco()
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    elif data.startswith("set_preco_"):
+        val = int(data.replace("set_preco_", ""))
+        usuario["preco_max"] = val
+        salvar()
+        answer_callback(cb_id, f"✅ Preço máx: R$ {val:,}")
+        texto, botoes = teclado_menu_principal(usuario)
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    elif data == "digitar_preco":
+        usuario["estado"] = "aguardando_preco"
+        salvar()
+        send(chat_id, "💰 <b>Digite o preço máximo em reais:</b>\nExemplo: <code>4500</code>")
+ 
+    # ── CLASSE ──────────────────────────────────────────────
+    elif data == "menu_classe":
+        texto, botoes = teclado_classe()
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    elif data.startswith("set_classe_"):
+        classe = data.replace("set_classe_", "")
+        usuario["classe"] = classe
+        salvar()
+        nomes = {"Economy":"Econômica","Premium_Economy":"Econômica Premium",
+                 "Business":"Executiva","First":"Primeira Classe"}
+        answer_callback(cb_id, f"✅ Classe: {nomes.get(classe, classe)}")
+        texto, botoes = teclado_menu_principal(usuario)
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    # ── ADULTOS ─────────────────────────────────────────────
+    elif data == "menu_adultos":
+        texto, botoes = teclado_adultos()
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    elif data.startswith("set_adultos_"):
+        n = int(data.replace("set_adultos_", ""))
+        usuario["adultos"] = n
+        salvar()
+        answer_callback(cb_id, f"✅ {n} adulto(s)")
+        texto, botoes = teclado_menu_principal(usuario)
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    # ── FAVORITO ────────────────────────────────────────────
+    elif data == "menu_favorito":
+        texto, botoes = teclado_favorito(usuario)
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    elif data.startswith("set_fav_"):
+        cod = data.replace("set_fav_", "")
+        usuario["favorito"] = cod
+        salvar()
+        nome_fav = TODOS_DESTINOS.get(cod, cod)
+        answer_callback(cb_id, f"⭐ Favorito: {nome_fav}")
+        texto, botoes = teclado_menu_principal(usuario)
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    # ── PAUSAR/RETOMAR ──────────────────────────────────────
+    elif data == "toggle_pausa":
+        usuario["pausado"] = not usuario.get("pausado", False)
+        salvar()
+        status = "⏸ Alertas pausados" if usuario["pausado"] else "▶️ Alertas retomados"
+        answer_callback(cb_id, status)
+        texto, botoes = teclado_menu_principal(usuario)
+        send(chat_id, texto, botoes, editar_msg_id=msg_id)
+ 
+    # ── BUSCAR AGORA ────────────────────────────────────────
+    elif data == "buscar":
+        if not usuario.get("data_ida"):
+            send(chat_id,
+                 "⚠️ <b>Defina uma data de ida primeiro!</b>",
+                 [[{"text": "📅 Definir Data", "callback_data": "menu_datas"}]])
+            return
+        send(chat_id, "🔍 <b>Buscando as melhores passagens...</b>\nIsso pode levar alguns segundos. ✈️")
+        threading.Thread(target=_buscar_e_responder, args=(usuario,), daemon=True).start()
+ 
+    # ── RESUMO SEMANAL ──────────────────────────────────────
+    elif data == "resumo":
+        enviar_resumo_usuario(usuario)
+ 
+ 
+def _buscar_e_responder(usuario):
+    ofertas, quedas = buscar_para_usuario(usuario)
+    if ofertas is None:
+        send(usuario["chat_id"], quedas)  # quedas aqui é a mensagem de erro
+        return
+    msg = montar_msg_resultados(usuario, ofertas, quedas)
+    botoes = [[{"text": "🔙 Voltar ao Menu", "callback_data": "menu_principal"}]]
+    send(usuario["chat_id"], msg, botoes)
+ 
+ 
+# ============================================================
+#  PROCESSAMENTO DE MENSAGENS DE TEXTO
+# ============================================================
+ 
+def processar_mensagem(update):
+    msg = update.get("message", {})
+    if not msg:
+        return
+    chat    = msg.get("chat", {})
+    chat_id = chat.get("id")
+    texto   = (msg.get("text") or "").strip()
+    nome    = chat.get("first_name", "")
+ 
+    if not chat_id or not texto:
+        return
+ 
+    usuario = get_user(chat_id, nome)
+    estado  = usuario.get("estado")
+ 
+    # ── COMANDOS ────────────────────────────────────────────
+    if texto.startswith("/start") or texto.startswith("/menu"):
+        usuario["nome"] = nome
+        usuario["estado"] = None
+        salvar()
+        txt, botoes = teclado_menu_principal(usuario)
+        send(chat_id, txt, botoes)
+        return
+ 
+    if texto.startswith("/ajuda"):
+        send(chat_id,
+             "✈️ <b>Como usar o Monitor de Passagens PRO:</b>\n\n"
+             "1️⃣ Digite /start para abrir o menu\n"
+             "2️⃣ Configure sua <b>origem</b> (de onde vai sair)\n"
+             "3️⃣ Adicione seus <b>destinos</b> favoritos\n"
+             "4️⃣ Defina as <b>datas</b> da viagem\n"
+             "5️⃣ Configure o <b>preço máximo</b>\n"
+             "6️⃣ Clique em <b>Buscar Agora</b>!\n\n"
+             "O bot também busca automaticamente a cada "
+             f"{VERIFICAR_HORAS}h e te avisa se encontrar promoções! 🔔")
+        return
+ 
+    # ── ESTADOS (aguardando input do usuário) ────────────────
+    if estado == "aguardando_data_ida":
+        try:
+            dt = datetime.strptime(texto.strip(), "%d/%m/%Y")
+            if dt.date() <= datetime.today().date():
+                send(chat_id, "⚠️ A data precisa ser no futuro! Tente novamente:")
+                return
+            usuario["data_ida"] = dt.strftime("%Y-%m-%d")
+            usuario["data_volta"] = ""
+            usuario["estado"] = None
+            salvar()
+            texto_teclado, botoes = teclado_volta(usuario["data_ida"])
+            send(chat_id, texto_teclado, botoes)
+        except ValueError:
+            send(chat_id, "⚠️ Formato inválido! Use DD/MM/AAAA\nExemplo: <code>15/07/2026</code>")
+        return
+ 
+    if estado == "aguardando_data_volta":
+        try:
+            dt = datetime.strptime(texto.strip(), "%d/%m/%Y")
+            ida = datetime.strptime(usuario["data_ida"], "%Y-%m-%d")
+            if dt.date() <= ida.date():
+                send(chat_id, "⚠️ A data de volta precisa ser depois da ida! Tente novamente:")
+                return
+            usuario["data_volta"] = dt.strftime("%Y-%m-%d")
+            usuario["estado"] = None
+            salvar()
+            txt, botoes = teclado_menu_principal(usuario)
+            send(chat_id, f"✅ Datas configuradas!\n\n" + txt, botoes)
+        except ValueError:
+            send(chat_id, "⚠️ Formato inválido! Use DD/MM/AAAA\nExemplo: <code>29/07/2026</code>")
+        return
+ 
+    if estado == "aguardando_preco":
+        try:
+            val = int(texto.strip().replace(".", "").replace(",", "").replace("R$","").strip())
+            if val < 100:
+                send(chat_id, "⚠️ Valor muito baixo! Tente um valor maior:")
+                return
+            usuario["preco_max"] = val
+            usuario["estado"] = None
+            salvar()
+            txt, botoes = teclado_menu_principal(usuario)
+            send(chat_id, f"✅ Preço máximo: R$ {val:,}\n\n" + txt, botoes)
+        except ValueError:
+            send(chat_id, "⚠️ Digite apenas números. Exemplo: <code>4500</code>")
+        return
+ 
+    # ── MENSAGEM NÃO RECONHECIDA ─────────────────────────────
+    txt, botoes = teclado_menu_principal(usuario)
+    send(chat_id, txt, botoes)
+ 
+ 
+# ============================================================
+#  VERIFICAÇÃO AUTOMÁTICA
+# ============================================================
+ 
+def verificar_automatico():
+    print(f"\n[{datetime.now()}] 🔍 Verificação automática...")
+    with data_lock:
+        usuarios = [deepcopy(u) for u in state["users"].values()
+                    if not u.get("pausado") and u.get("data_ida")]
+ 
+    if not usuarios:
+        print(f"[{datetime.now()}] Nenhum usuário com data definida.")
+        return
+ 
     for usuario in usuarios:
         try:
-            print(f"  → {usuario['chat_id']} ({len(usuario['destinos'])} destinos, {usuario.get('duracao', DURACAO_VIAGEM)} dias)")
             with data_lock:
                 vivo = state["users"].get(usuario["chat_id"])
                 if not vivo:
                     continue
-            resultado = verificar_para_usuario(vivo, cache)
-            if not resultado:
-                enviar_telegram(
-                    usuario["chat_id"],
-                    f"🔍 <b>Verificação concluída</b>\n\n"
-                    f"Nenhuma passagem abaixo de ~R$ {usuario['preco_max']:,} no momento.\n"
-                    f"Próxima verificação em {VERIFICAR_HORAS}h. ⏰"
-                )
+            ofertas, quedas = buscar_para_usuario(vivo)
+            if ofertas is None:
                 continue
-            msg = montar_mensagem_alertas(usuario, resultado["ofertas"], resultado["quedas"])
-            enviar_telegram(usuario["chat_id"], msg)
- 
-            with data_lock:
-                state["ofertas_semana"].append({
-                    "chat_id": usuario["chat_id"],
-                    "ts":      datetime.now().isoformat(timespec="seconds"),
-                    "ofertas": resultado["ofertas"][:5],
-                })
-                if len(state["ofertas_semana"]) > 5000:
-                    state["ofertas_semana"] = state["ofertas_semana"][-5000:]
-                salvar_dados()
+            if ofertas:
+                msg = montar_msg_resultados(vivo, ofertas, quedas)
+                botoes = [[{"text": "⚙️ Configurações", "callback_data": "menu_principal"}]]
+                send(vivo["chat_id"], msg, botoes)
+            else:
+                send(vivo["chat_id"],
+                     f"🔍 Verificação automática: nenhuma oferta abaixo de "
+                     f"R$ {vivo['preco_max']:,} para as datas configuradas.")
         except Exception as e:
-            print(f"  ⚠️ Erro {usuario['chat_id']}: {e}")
+            print(f"⚠️ Erro em {usuario['chat_id']}: {e}")
  
-    print(f"[{datetime.now()}] ✅ Verificação concluída.")
+    print(f"[{datetime.now()}] ✅ Verificação automática concluída.")
  
  
-# ============================================================
-#  RESUMO SEMANAL
-# ============================================================
- 
-def resumo_semanal():
-    print(f"[{datetime.now()}] 📅 Gerando resumo semanal...")
+def enviar_resumo_usuario(usuario):
     with data_lock:
-        historico = list(state.get("ofertas_semana", []))
-        usuarios  = list(state["users"].values())
+        historico = [e for e in state.get("historico_semana", [])
+                     if e.get("chat_id") == usuario["chat_id"]]
  
-    by_user = {}
+    if not historico:
+        send(usuario["chat_id"],
+             "📅 <b>Resumo Semanal</b>\n\nNenhuma busca realizada esta semana.\n"
+             "Use o menu para configurar e buscar passagens!",
+             [[{"text": "⚙️ Abrir Menu", "callback_data": "menu_principal"}]])
+        return
+ 
+    melhores = {}
     for entry in historico:
-        by_user.setdefault(entry["chat_id"], []).extend(entry["ofertas"])
+        for o in entry.get("ofertas", []):
+            k = o["destino"]
+            if k not in melhores or o["preco"] < melhores[k]["preco"]:
+                melhores[k] = o
  
-    for u in usuarios:
-        if u.get("pausado"):
-            continue
-        ofertas = by_user.get(u["chat_id"], [])
-        if not ofertas:
-            enviar_telegram(u["chat_id"],
-                "📅 <b>RESUMO SEMANAL</b>\n\n"
-                "Nenhuma oferta capturada esta semana dentro do seu limite.\n"
-                "Use /preco para ajustar seu teto. ✈️")
-            continue
-        melhores = {}
-        for o in ofertas:
-            if not melhores.get(o["iata"]) or o["preco"] < melhores[o["iata"]]["preco"]:
-                melhores[o["iata"]] = o
-        ranking = sorted(melhores.values(), key=lambda x: x["preco"])[:10]
-        msg = (
-            f"📅 <b>RESUMO SEMANAL</b>\n"
-            f"🗓 {datetime.now().strftime('%d/%m/%Y')}\n"
-            f"💎 Top {len(ranking)} ofertas da semana\n"
-            f"{AVISO_PRECO}\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        )
-        for i, o in enumerate(ranking, 1):
-            msg += fmt_oferta(o, prefix=f"<b>#{i}</b> ") + "\n"
-        msg += "━━━━━━━━━━━━━━━━━━━━\n🤖 Bom domingo! ✈️"
-        enviar_telegram(u["chat_id"], msg)
+    ranking = sorted(melhores.values(), key=lambda x: x["preco"])[:10]
+    msg = (
+        f"📅 <b>RESUMO SEMANAL</b>\n"
+        f"🗓 {datetime.now().strftime('%d/%m/%Y')}\n"
+        f"💎 Top {len(ranking)} ofertas da semana\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
+    for i, o in enumerate(ranking, 1):
+        msg += f"<b>#{i}</b> {fmt_resultado(o)}\n"
+    msg += "━━━━━━━━━━━━━━━━━━━━\n🤖 Monitor Passagens PRO"
+    send(usuario["chat_id"], msg,
+         [[{"text": "⚙️ Voltar ao Menu", "callback_data": "menu_principal"}]])
  
+ 
+def resumo_semanal_todos():
     with data_lock:
-        state["ofertas_semana"] = []
-        salvar_dados()
-    print(f"[{datetime.now()}] ✅ Resumo semanal enviado.")
- 
- 
-# ============================================================
-#  COMANDOS DO TELEGRAM
-# ============================================================
- 
-MENU = (
-    "🤖 <b>Menu de comandos</b>\n\n"
-    "⚙️ <b>Configurações</b>\n"
-    "/preco 8000 — define preço máximo (~R$)\n"
-    "/duracao 10 — dias de estadia ida e volta (padrão: 14)\n"
-    "/favorito DUB — define destino favorito\n"
-    "/meses 6 7 8 — filtra meses (vazio = todos)\n\n"
-    "🌍 <b>Destinos</b>\n"
-    "/destinos — lista todos disponíveis\n"
-    "/ativar DUB LIS CDG — ativa destinos\n"
-    "/desativar DUB — desativa um destino\n\n"
-    "🔍 <b>Buscas</b>\n"
-    "/buscar — força busca imediata\n"
-    "/meus — suas configurações atuais\n\n"
-    "🔔 <b>Alertas</b>\n"
-    "/pausar — pausa os alertas\n"
-    "/retomar — retoma os alertas\n\n"
-    "/ajuda — mostra este menu"
-)
- 
- 
-def cmd_start(usuario, args):
-    salvar_dados()
-    return (
-        f"🚀 <b>Bem-vindo ao Monitor de Passagens PRO!</b>\n\n"
-        f"Você foi cadastrado. Configurações iniciais:\n"
-        f"💰 Preço máximo: ~R$ {usuario['preco_max']:,}\n"
-        f"⭐ Favorito: DUB (Dublin)\n"
-        f"🗓 Duração: {usuario.get('duracao', DURACAO_VIAGEM)} dias (ida e volta)\n"
-        f"🌍 Destinos ativos: {len(usuario['destinos'])}\n\n"
-        f"Use /ajuda para ver todos os comandos. ✈️"
-    )
- 
- 
-def cmd_preco(usuario, args):
-    if not args:
-        return f"💰 Seu preço máximo atual: <b>~R$ {usuario['preco_max']:,}</b>\nUse: /preco 8000"
-    try:
-        valor = int(args[0].replace(".", "").replace(",", ""))
-        if valor < 100:
-            return "⚠️ Valor muito baixo. Ex: /preco 8000"
-        usuario["preco_max"] = valor
-        salvar_dados()
-        return f"✅ Preço máximo atualizado para <b>~R$ {valor:,}</b>."
-    except ValueError:
-        return "⚠️ Formato inválido. Ex: /preco 8000"
- 
- 
-def cmd_duracao(usuario, args):
-    if not args:
-        return f"🗓 Duração atual: <b>{usuario.get('duracao', DURACAO_VIAGEM)} dias</b>\nUse: /duracao 10"
-    try:
-        dias = int(args[0])
-        if dias < 1 or dias > 90:
-            return "⚠️ Use entre 1 e 90 dias."
-        usuario["duracao"] = dias
-        salvar_dados()
-        return f"✅ Duração atualizada para <b>{dias} dias</b> de estadia."
-    except ValueError:
-        return "⚠️ Formato inválido. Ex: /duracao 10"
- 
- 
-def cmd_destinos(usuario, args):
-    msg = "🌍 <b>Destinos disponíveis</b>\n✅ = ativo  ⬜ = inativo\n\n"
-    for cod, nome, emoji in DESTINOS:
-        marca = "✅" if cod in usuario["destinos"] else "⬜"
-        msg += f"{marca} <code>{cod}</code> {emoji} {nome}\n"
-    return msg
- 
- 
-def cmd_ativar(usuario, args):
-    if not args:
-        return "Use: /ativar DUB LIS CDG"
-    adicionados, invalidos = [], []
-    for code in args:
-        c = code.upper()
-        if c not in DESTINOS_MAP:
-            invalidos.append(c)
-        elif c not in usuario["destinos"]:
-            usuario["destinos"].append(c)
-            adicionados.append(c)
-    salvar_dados()
-    out = ""
-    if adicionados: out += f"✅ Ativados: {', '.join(adicionados)}\n"
-    if invalidos:   out += f"⚠️ Inválidos: {', '.join(invalidos)}\n"
-    return out.strip() or "Nenhuma alteração."
- 
- 
-def cmd_desativar(usuario, args):
-    if not args:
-        return "Use: /desativar DUB"
-    removidos, ausentes = [], []
-    for code in args:
-        c = code.upper()
-        if c in usuario["destinos"]:
-            usuario["destinos"].remove(c)
-            removidos.append(c)
-        else:
-            ausentes.append(c)
-    salvar_dados()
-    out = ""
-    if removidos: out += f"❌ Desativados: {', '.join(removidos)}\n"
-    if ausentes:  out += f"⚠️ Não estavam ativos: {', '.join(ausentes)}\n"
-    return out.strip() or "Nenhuma alteração."
- 
- 
-def cmd_favorito(usuario, args):
-    if not args:
-        return f"⭐ Favorito atual: <b>{usuario.get('favorito','—')}</b>\nUse: /favorito DUB"
-    c = args[0].upper()
-    if c not in DESTINOS_MAP:
-        return f"⚠️ Código inválido: {c}"
-    usuario["favorito"] = c
-    if c not in usuario["destinos"]:
-        usuario["destinos"].append(c)
-    salvar_dados()
-    _, nome, emoji = DESTINOS_MAP[c]
-    return f"⭐ Favorito atualizado: {emoji} <b>{nome}</b>"
- 
- 
-def cmd_meses(usuario, args):
-    if not args:
-        atuais = usuario.get("meses") or []
-        if not atuais:
-            return "📆 Sem filtro de mês (todos os meses).\nUse: /meses 6 7 8"
-        return f"📆 Meses ativos: {', '.join(map(str, atuais))}"
-    meses = []
-    for a in args:
-        try:
-            m = int(a)
-            if 1 <= m <= 12:
-                meses.append(m)
-        except ValueError:
-            pass
-    usuario["meses"] = sorted(set(meses))
-    salvar_dados()
-    if not usuario["meses"]:
-        return "📆 Filtro de meses removido (todos os meses)."
-    return f"📆 Filtro: meses {', '.join(map(str, usuario['meses']))}"
- 
- 
-def cmd_meus(usuario, args):
-    meses    = usuario.get("meses") or []
-    meses_txt = ", ".join(map(str, meses)) if meses else "todos"
-    favorito  = usuario.get("favorito") or "—"
-    nome_fav  = DESTINOS_MAP.get(favorito, (favorito, favorito, ""))[1]
-    duracao   = usuario.get("duracao", DURACAO_VIAGEM)
-    return (
-        f"⚙️ <b>Suas configurações</b>\n\n"
-        f"💰 Preço máximo: ~R$ {usuario['preco_max']:,}\n"
-        f"🗓 Duração (ida e volta): {duracao} dias\n"
-        f"⭐ Favorito: {favorito} — {nome_fav}\n"
-        f"📆 Meses: {meses_txt}\n"
-        f"🌍 Destinos ativos ({len(usuario['destinos'])}):\n"
-        f"   {', '.join(usuario['destinos']) or '—'}\n"
-        f"⏯ Status: {'⏸ Pausado' if usuario.get('pausado') else '▶️ Ativo'}\n"
-    )
- 
- 
-def cmd_buscar(usuario, args):
-    enviar_telegram(usuario["chat_id"], "🔍 Buscando agora… pode levar alguns segundos.")
-    cache     = {}
-    resultado = verificar_para_usuario(usuario, cache)
-    if not resultado:
-        return f"Nenhuma oferta abaixo de ~R$ {usuario['preco_max']:,} no momento."
-    msg = montar_mensagem_alertas(usuario, resultado["ofertas"], resultado["quedas"])
-    enviar_telegram(usuario["chat_id"], msg)
-    return None
- 
- 
-def cmd_pausar(usuario, args):
-    usuario["pausado"] = True
-    salvar_dados()
-    return "⏸ Alertas pausados. Use /retomar para reativar."
- 
- 
-def cmd_retomar(usuario, args):
-    usuario["pausado"] = False
-    salvar_dados()
-    return "▶️ Alertas retomados!"
- 
- 
-def cmd_ajuda(usuario, args):
-    return MENU
- 
- 
-COMANDOS = {
-    "start":     cmd_start,
-    "preco":     cmd_preco,
-    "duracao":   cmd_duracao,
-    "destinos":  cmd_destinos,
-    "ativar":    cmd_ativar,
-    "desativar": cmd_desativar,
-    "favorito":  cmd_favorito,
-    "meses":     cmd_meses,
-    "meus":      cmd_meus,
-    "buscar":    cmd_buscar,
-    "pausar":    cmd_pausar,
-    "retomar":   cmd_retomar,
-    "ajuda":     cmd_ajuda,
-    "help":      cmd_ajuda,
-    "menu":      cmd_ajuda,
-}
- 
- 
-def processar_update(update):
-    msg = update.get("message") or update.get("edited_message")
-    if not msg:
-        return
-    chat    = msg.get("chat") or {}
-    chat_id = chat.get("id")
-    if chat_id is None:
-        return
-    texto = (msg.get("text") or "").strip()
-    if not texto.startswith("/"):
-        return
- 
-    partes  = texto.split()
-    cmd     = partes[0][1:].split("@")[0].lower()
-    args    = partes[1:]
-    nome    = (chat.get("first_name") or "") + (" " + chat.get("last_name") if chat.get("last_name") else "")
-    usuario = get_user(chat_id, nome.strip())
- 
-    handler = COMANDOS.get(cmd)
-    if not handler:
-        enviar_telegram(chat_id, "❓ Comando não reconhecido. Use /ajuda")
-        return
-    try:
-        resposta = handler(usuario, args)
-        if resposta:
-            enviar_telegram(chat_id, resposta)
-    except Exception as e:
-        print(f"[{datetime.now()}] ⚠️ Erro /{cmd}: {e}")
-        enviar_telegram(chat_id, f"⚠️ Erro ao executar /{cmd}: {e}")
+        usuarios = list(state["users"].values())
+    for u in usuarios:
+        if not u.get("pausado"):
+            enviar_resumo_usuario(u)
+    with data_lock:
+        state["historico_semana"] = []
+        salvar()
  
  
 # ============================================================
 #  POLLING
 # ============================================================
  
-def telegram_polling():
+def polling():
     print(f"[{datetime.now()}] 📡 Polling iniciado...")
     offset = None
     while True:
         try:
             params = {"timeout": 30}
-            if offset is not None:
+            if offset:
                 params["offset"] = offset
             r = requests.get(f"{TELEGRAM_API}/getUpdates", params=params, timeout=40)
             if r.status_code != 200:
@@ -740,29 +1048,28 @@ def telegram_polling():
             for upd in r.json().get("result", []):
                 offset = upd["update_id"] + 1
                 try:
-                    processar_update(upd)
+                    if "callback_query" in upd:
+                        processar_callback(upd)
+                    elif "message" in upd:
+                        processar_mensagem(upd)
                 except Exception as e:
-                    print(f"[{datetime.now()}] erro update: {e}")
+                    print(f"⚠️ Erro update: {e}")
         except requests.exceptions.ReadTimeout:
             continue
         except Exception as e:
-            print(f"[{datetime.now()}] ⚠️ polling: {e}")
+            print(f"⚠️ Polling: {e}")
             time.sleep(5)
  
  
-# ============================================================
-#  SCHEDULER
-# ============================================================
- 
 def scheduler_loop():
-    schedule.every(VERIFICAR_HORAS).hours.do(verificar_todos)
-    schedule.every().sunday.at("09:00").do(resumo_semanal)
+    schedule.every(VERIFICAR_HORAS).hours.do(verificar_automatico)
+    schedule.every().sunday.at("09:00").do(resumo_semanal_todos)
     print(f"[{datetime.now()}] ⏰ Agendador: a cada {VERIFICAR_HORAS}h + resumo dom 09:00")
     while True:
         try:
             schedule.run_pending()
         except Exception as e:
-            print(f"[{datetime.now()}] ⚠️ scheduler: {e}")
+            print(f"⚠️ Scheduler: {e}")
         time.sleep(30)
  
  
@@ -772,31 +1079,23 @@ def scheduler_loop():
  
 def main():
     print("=" * 60)
-    print(f"✈️  Monitor de Passagens PRO — {ORIGEM} → Mundo")
-    print(f"    {len(DESTINOS)} destinos | Padrão ~R$ {PRECO_MAXIMO_PAD:,} | {DURACAO_VIAGEM} dias")
-    print(f"    🔁 Verificação a cada {VERIFICAR_HORAS}h")
+    print("✈️  Monitor de Passagens PRO — Com Botões Interativos")
+    print(f"    {len(TODOS_DESTINOS)} destinos | FlightAPI.io")
     print("=" * 60)
  
-    carregar_dados()
+    carregar()
  
-    enviar_telegram(
-        ADMIN_CHAT_ID,
-        "🚀 <b>Monitor PRO online!</b>\n\n"
-        f"🛫 Origem: {ORIGEM}\n"
-        f"🌍 Destinos: <b>{len(DESTINOS)}</b>\n"
-        f"👥 Usuários: <b>{len(state['users'])}</b>\n"
-        f"🗓 Duração padrão: {DURACAO_VIAGEM} dias (ida e volta)\n"
-        f"⏰ Verificação a cada {VERIFICAR_HORAS}h\n"
-        f"📅 Resumo semanal: dom 09:00\n\n"
-        f"{AVISO_PRECO}\n\n"
-        "Novos usuários: enviem /start ao bot. ✅"
-    )
- 
-    if state["users"]:
-        threading.Thread(target=verificar_todos, daemon=True).start()
+    send(ADMIN_CHAT_ID,
+         "🚀 <b>Monitor PRO v2 online!</b>\n\n"
+         f"✨ Agora com botões interativos!\n"
+         f"🌍 {len(TODOS_DESTINOS)} destinos disponíveis\n"
+         f"🇧🇷 Incluindo cidades brasileiras\n"
+         f"📅 Configure datas pelo menu\n"
+         f"⏰ Verificação a cada {VERIFICAR_HORAS}h\n\n"
+         "Use /start para abrir o menu! ✈️")
  
     threading.Thread(target=scheduler_loop, daemon=True).start()
-    telegram_polling()
+    polling()
  
  
 if __name__ == "__main__":
